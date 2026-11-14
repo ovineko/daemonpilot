@@ -1,0 +1,6 @@
+go test fuzz v1
+string("fuzz")
+string("")
+string("")
+string("prefix")
+int64(0)
