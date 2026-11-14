@@ -1,0 +1,45 @@
+description: Setup Node.js, pnpm, and caching for daemonpilot
+inputs:
+  cache-datamitsu:
+    default: "true"
+    description: "Whether to cache the datamitsu store"
+    required: false
+  install-dependencies:
+    default: "true"
+    description: "Whether to run pnpm install"
+    required: false
+  working-directory:
+    default: "."
+    description: "Repository path relative to the workspace"
+    required: false
+name: Setup Environment
+runs:
+  steps:
+    - name: Setup pnpm
+      uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5.0.0
+      with:
+        package_json_file: ${{ inputs.working-directory }}/package.json
+        # Auto-detects version from the packageManager field in package.json
+    - name: Setup Node.js
+      uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+      with:
+        cache: "pnpm"
+        cache-dependency-path: ${{ inputs.working-directory }}/pnpm-lock.yaml
+        node-version-file: ${{ inputs.working-directory }}/.node-version
+    - if: ${{ inputs.cache-datamitsu == 'true' }}
+      name: Cache datamitsu store
+      uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
+      with:
+        key: datamitsu-store-${{ runner.os }}-${{ hashFiles(format('{0}/package.json', inputs.working-directory), format('{0}/pnpm-lock.yaml', inputs.working-directory)) }}
+        path: ~/.cache/datamitsu/store
+    - if: ${{ inputs.install-dependencies == 'true' }}
+      name: Install dependencies
+      run: pnpm install --frozen-lockfile
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+    - if: ${{ inputs.install-dependencies == 'true' }}
+      name: Initialize managed tools
+      run: pnpm dm init
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+  using: composite

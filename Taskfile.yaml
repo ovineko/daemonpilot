@@ -1,0 +1,36 @@
+tasks:
+  docs:build:
+    cmds:
+      - pnpm dm exec zensical -- build --strict
+    desc: Build the Zensical documentation site into site/
+  docs:clean:
+    cmds:
+      - rm -rf site/
+    desc: Remove the generated site directory
+  docs:serve:
+    cmds:
+      - pnpm dm exec zensical -- serve --dev-addr 0.0.0.0:8000
+    desc: Serve the documentation site locally (http://localhost:8000)
+  e2e:docker:
+    cmds:
+      - go test -tags e2e_docker -count=1 -v -timeout 20m -run 'TestExpectationRegistry|TestProfiles' ./e2e/docker
+    desc: Run the required Docker lifecycle and self-update contracts
+    env:
+      DAEMONPILOT_E2E_REQUIRE: "1"
+      GOWORK: "off"
+  e2e:docker:init:
+    cmds:
+      - go test -tags e2e_docker -count=1 -v -timeout 60m -run 'TestInitRegistry|TestInitProfiles' ./e2e/docker
+    desc: Run the required real-init Docker service lifecycle matrix
+    env:
+      DAEMONPILOT_E2E_REQUIRE: "1"
+      GOWORK: "off"
+  fuzz:
+    cmds:
+      - sh scripts/fuzz.sh '{{.FUZZTIME}}'
+    desc: Run each fuzz target with the script's default time budget
+  test:crossarch:
+    cmds:
+      - sh scripts/crossarch.sh docker
+    desc: Run portable test binaries on five Linux architectures
+version: "3"

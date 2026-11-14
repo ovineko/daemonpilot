@@ -1,0 +1,85 @@
+[project]
+site_name = "daemonpilot"
+site_description = "Go library for self-managing services: daemonization, watchdog supervision, and signed self-update"
+site_author = "ovineko"
+site_url = "https://daemonpilot.ovineko.com/"
+copyright = "Copyright &copy; 2026 Alexander Svinarev (shibanet0)"
+repo_url = "https://github.com/ovineko/daemonpilot"
+repo_name = "ovineko/daemonpilot"
+
+docs_dir = "docs"
+site_dir = "site"
+extra_css = ["assets/stylesheets/extra.css"]
+
+[project.theme]
+language = "en"
+
+[[project.theme.palette]]
+media = "(prefers-color-scheme)"
+toggle.icon = "lucide/sun-moon"
+toggle.name = "Switch to light mode"
+primary = "cyan"
+accent = "cyan"
+
+# Palette toggle for light mode
+[[project.theme.palette]]
+media = "(prefers-color-scheme: light)"
+scheme = "default"
+toggle.icon = "lucide/sun"
+toggle.name = "Switch to dark mode"
+primary = "cyan"
+accent = "cyan"
+
+# Palette toggle for dark mode
+[[project.theme.palette]]
+media = "(prefers-color-scheme: dark)"
+scheme = "slate"
+toggle.icon = "lucide/moon"
+toggle.name = "Switch to system preference"
+primary = "cyan"
+accent = "cyan"
+
+[project.theme.features]
+"announce.dismiss" = true
+"content.code.annotate" = true
+"content.code.copy" = true
+"navigation.expand" = true
+"navigation.instant" = true
+"navigation.sections" = true
+"navigation.top" = true
+"search.highlight" = true
+"search.suggest" = true
+
+# Navigation structure
+[[project.nav]]
+Home = "index.md"
+
+[[project.nav]]
+"Getting Started" = [
+  { Installation = "get-started/installation.md" },
+  { "Quick Start" = "get-started/quick-start.md" },
+]
+
+[[project.nav]]
+Guides = [
+  { Architecture = "guides/architecture.md" },
+  { "Watchdog–Worker Protocol" = "guides/watchdog-worker-protocol.md" },
+  { "Init Systems" = "guides/init-systems.md" },
+  { "Service Management" = "guides/service-management.md" },
+  { "Self-Update" = "guides/self-update.md" },
+  { "HTTP Releases" = "guides/http-releases.md" },
+  { "Health Checks" = "guides/health-checks.md" },
+  { "Readiness Signaling" = "guides/readiness.md" },
+  { Observability = "guides/observability.md" },
+  { "Resource Limits" = "guides/resource-limits.md" },
+  { "Config Patchers" = "guides/config-patchers.md" },
+  { Troubleshooting = "guides/troubleshooting.md" },
+  { Testing = "guides/testing.md" },
+]
+
+[[project.nav]]
+Reference = [
+  { "CLI Commands" = "reference/cli.md" },
+  { Configuration = "reference/configuration.md" },
+  { Examples = "reference/examples.md" },
+]

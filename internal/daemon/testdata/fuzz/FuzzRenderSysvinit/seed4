@@ -1,0 +1,4 @@
+go test fuzz v1
+string("\u754c")
+string("\u00e9")
+string("\u754c")

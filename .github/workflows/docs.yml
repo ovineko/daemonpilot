@@ -1,0 +1,40 @@
+concurrency:
+  cancel-in-progress: false
+  group: "pages"
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Setup environment
+        uses: ./.github/actions/setup-environment
+      - name: Build documentation site
+        run: pnpm dm exec task -- docs:build
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: site
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - id: deployment
+        name: Deploy to GitHub Pages
+        uses: actions/deploy-pages@cd2ce8fcbc39b97be8ca5fce6e763baed58fa128 # v5.0.0
+name: Documentation
+on:
+  # Deploy only on a stable release (a pushed v* tag) or manually via the
+  # "Run workflow" button — never on every push to main, so unreleased work
+  # doesn't go live ahead of a release.
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
+  workflow_dispatch: {}
+permissions:
+  contents: read
+  id-token: write
+  pages: write

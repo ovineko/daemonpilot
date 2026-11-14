@@ -1,0 +1,4 @@
+go test fuzz v1
+string("nul\u0000")
+string("nul\u0000")
+string("path")

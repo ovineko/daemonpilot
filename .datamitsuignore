@@ -1,0 +1,11 @@
+# Optional prose, policy, and online scanners remain outside the local quality gate.
+**/*: vale, harper-cli, knip, typos, lychee, grype, trivy, osv-scanner, bearer, actionlint, cspell
+
+# Archived plans preserve historical source links and formatting, not live site contracts.
+docs/.plans/**: lychee-offline, markdownlint-cli2
+
+# Init-system fixtures deliberately run as root without exposing network ports.
+**/*: droast
+
+# The pinned analyzer cannot decode Go 1.27.2 exports; builds and go vet remain enabled.
+**/*: golangci-lint

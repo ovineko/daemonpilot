@@ -1,0 +1,60 @@
+jobs:
+  docker:
+    defaults:
+      run:
+        working-directory: daemonpilot
+    env:
+      DAEMONPILOT_E2E_REQUIRE: "1"
+      GOWORK: "off"
+    if: vars.DAEMONPILOT_E2E_ENABLED == 'true'
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout daemonpilot
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: daemonpilot
+          persist-credentials: false
+      - name: Setup Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.1.0
+        with:
+          cache-dependency-path: daemonpilot/go.sum
+          go-version-file: daemonpilot/go.mod
+      - name: Compile and vet Docker packages
+        run: go vet -tags e2e_docker ./...
+      - name: Native contracts
+        run: go test -tags e2e_docker -count=1 -v -timeout 10m -run 'TestExpectationRegistry|TestNative' ./e2e/docker
+      - name: Docker contracts
+        run: go test -tags e2e_docker -count=1 -v -timeout 20m -run TestProfiles ./e2e/docker
+    timeout-minutes: 30
+  init:
+    defaults:
+      run:
+        working-directory: daemonpilot
+    env:
+      DAEMONPILOT_E2E_REQUIRE: "1"
+      GOWORK: "off"
+    if: vars.DAEMONPILOT_E2E_ENABLED == 'true'
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout daemonpilot
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: daemonpilot
+          persist-credentials: false
+      - name: Setup Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.1.0
+        with:
+          cache-dependency-path: daemonpilot/go.sum
+          go-version-file: daemonpilot/go.mod
+      - name: Compile and vet Docker packages
+        run: go vet -tags e2e_docker ./...
+      - name: Native contracts
+        run: go test -tags e2e_docker -count=1 -v -timeout 10m -run 'TestInitRegistry|TestInitNative' ./e2e/docker
+      - name: Real init Docker matrix
+        run: go test -tags e2e_docker -count=1 -v -timeout 60m -run TestInitProfiles ./e2e/docker
+    timeout-minutes: 75
+name: Docker end-to-end contracts
+on:
+  workflow_dispatch: {}
+permissions:
+  contents: read

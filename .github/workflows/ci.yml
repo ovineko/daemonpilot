@@ -1,0 +1,106 @@
+concurrency:
+  cancel-in-progress: true
+  group: ci-${{ github.ref }}
+env:
+  GOWORK: "off"
+jobs:
+  build:
+    defaults:
+      run:
+        working-directory: daemonpilot
+    name: Build ${{ matrix.goos }}/${{ matrix.goarch }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: daemonpilot
+          persist-credentials: false
+      - name: Setup Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.1.0
+        with:
+          cache-dependency-path: daemonpilot/go.sum
+          go-version-file: daemonpilot/go.mod
+      - env:
+          GOARCH: ${{ matrix.goarch }}
+          GOOS: ${{ matrix.goos }}
+        name: Cross-compile
+        # go vet in addition to go build: go build skips _test.go files, so on
+        # its own it would not catch a mistagged test file on a target that has
+        # no runner in the test matrix.
+        run: |
+          go build ./...
+          go vet ./...
+    strategy:
+      fail-fast: false
+      matrix:
+        goarch:
+          - amd64
+          - arm64
+        goos:
+          - linux
+          - darwin
+          - freebsd
+          - openbsd
+          - windows
+  check:
+    defaults:
+      run:
+        working-directory: daemonpilot
+    name: Quality gate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: daemonpilot
+          persist-credentials: false
+      - name: Setup Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.1.0
+        with:
+          cache-dependency-path: daemonpilot/go.sum
+          go-version-file: daemonpilot/go.mod
+      - name: Setup environment
+        uses: ./daemonpilot/.github/actions/setup-environment
+        with:
+          working-directory: daemonpilot
+      - name: Run quality gate
+        run: pnpm dm lint --fail-fast=false
+  test:
+    defaults:
+      run:
+        working-directory: daemonpilot
+    name: Test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: daemonpilot
+          persist-credentials: false
+      - name: Setup Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.1.0
+        with:
+          cache-dependency-path: daemonpilot/go.sum
+          go-version-file: daemonpilot/go.mod
+      - name: Vet
+        run: go vet ./...
+      - name: Test
+        run: go test ./...
+      - name: Test with race detector
+        run: go test -race ./...
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - macos-latest
+name: CI
+on:
+  pull_request: {}
+  push:
+    branches:
+      - main
+  workflow_dispatch: {}
+permissions:
+  contents: read
