@@ -92,7 +92,7 @@
 
 # Other
 **/*.gpg
-daemonpilot
+/daemonpilot
 
 # Pulumi
 **/.pulumi/**/*.attrs

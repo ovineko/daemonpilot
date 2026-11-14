@@ -48,6 +48,7 @@
 - The Docker fixture uses `GO_DAEMONPILOT_E2E_CONFIG` for its inherited config path: a `DAEMONPILOT_`-prefixed fixture variable would be stripped by the worker launch environment filter. All builds and bind volumes live in test temporary directories.
 
 - `go.mod` pins the published `github.com/ovineko/procguard` module, verified by `go.sum`. No sibling checkout, local replacement, or CI revision override is required. Use `GOWORK=off` for isolated verification against the pinned dependencies.
+- Ignore the root binary as `/daemonpilot`, never an unanchored `daemonpilot` pattern, which also excludes `pkg/daemonpilot` and its setup, metrics, tests, and fuzz corpora from Git.
 
 - Run all tests: `go test ./...`
 - Run with race detector: `go test -race ./...`
