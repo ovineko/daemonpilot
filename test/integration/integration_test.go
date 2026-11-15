@@ -11,6 +11,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
@@ -137,7 +138,7 @@ func TestIntegration_FastPathUpdate(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	currentBinary := []byte("#!/bin/sh\necho 'old binary'\n")
-	currentPath := filepath.Join(tmpDir, "testapp")
+	currentPath := integrationBinaryPath(tmpDir)
 	if err := os.WriteFile(currentPath, currentBinary, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -193,7 +194,7 @@ func TestIntegration_FastPathUpdate(t *testing.T) {
 		t.Error("current binary should contain new content after fast-path update")
 	}
 
-	newFilePath := filepath.Join(tmpDir, "testapp.new")
+	newFilePath := currentPath + ".new"
 	if _, err := os.Stat(newFilePath); !os.IsNotExist(err) {
 		t.Error(".new file should not exist after fast-path update")
 	}
@@ -203,7 +204,7 @@ func TestIntegration_StagedUpdateApprovalRollbackConfirm(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	oldContent := []byte("#!/bin/sh\necho 'old binary'\n")
-	currentPath := filepath.Join(tmpDir, "testapp")
+	currentPath := integrationBinaryPath(tmpDir)
 	if err := os.WriteFile(currentPath, oldContent, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -269,7 +270,7 @@ func TestIntegration_StagedUpdateApprovalRollbackConfirm(t *testing.T) {
 		t.Error("current binary should contain new content after staged update")
 	}
 
-	rollbackPath := filepath.Join(tmpDir, "testapp.rollback")
+	rollbackPath := currentPath + ".rollback"
 	rollbackData, err := os.ReadFile(rollbackPath)
 	if err != nil {
 		t.Fatalf("read rollback binary: %v", err)
@@ -308,7 +309,7 @@ func TestIntegration_StagedUpdateRollbackTimeout(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	oldContent := []byte("#!/bin/sh\necho 'old binary'\n")
-	currentPath := filepath.Join(tmpDir, "testapp")
+	currentPath := integrationBinaryPath(tmpDir)
 	if err := os.WriteFile(currentPath, oldContent, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -359,7 +360,7 @@ func TestIntegration_StagedUpdateRollbackTimeout(t *testing.T) {
 		t.Fatalf("expected ErrWatchdogRestart, got: %v", err)
 	}
 
-	rollbackPath := filepath.Join(tmpDir, "testapp.rollback")
+	rollbackPath := currentPath + ".rollback"
 	err = u.HandleRollback(context.Background(), rollbackPath, 100*time.Millisecond)
 	if !errors.Is(err, daemonpilot.ErrRollbackRestored) {
 		t.Fatalf("expected ErrRollbackRestored, got: %v", err)
@@ -431,7 +432,7 @@ func TestIntegration_SelftestFailureRejectsUpdate(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	currentContent := []byte("#!/bin/sh\necho 'current'\n")
-	currentPath := filepath.Join(tmpDir, "testapp")
+	currentPath := integrationBinaryPath(tmpDir)
 	if err := os.WriteFile(currentPath, currentContent, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -468,12 +469,9 @@ func TestIntegration_SelftestFailureRejectsUpdate(t *testing.T) {
 		t.Fatalf("download and verify: %v", err)
 	}
 
-	failScript := filepath.Join(tmpDir, "testapp-fail")
-	scriptContent := "#!/bin/sh\n" +
-		"if [ \"$1\" = \"selftest\" ]; then\n" +
-		"  echo '{\"success\":false,\"checks\":{\"api\":{\"ok\":false,\"message\":\"connection refused\"}}}'\n" +
-		"fi\n"
-	if err := os.WriteFile(failScript, []byte(scriptContent), 0o755); err != nil {
+	failScript := testsupport.Fixture(t, "update", "../../internal/watchdog/testdata/updatefixture")
+	failMarker := filepath.Join(filepath.Dir(failScript), "fail-selftest")
+	if err := os.WriteFile(failMarker, nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -499,7 +497,7 @@ func TestIntegration_SelftestFailureRejectsUpdate(t *testing.T) {
 		t.Error("current binary should remain unchanged when selftest fails")
 	}
 
-	newFilePath := filepath.Join(tmpDir, "testapp.new")
+	newFilePath := currentPath + ".new"
 	if _, err := os.Stat(newFilePath); !os.IsNotExist(err) {
 		t.Error(".new file should be cleaned up after selftest failure")
 	}
@@ -507,15 +505,15 @@ func TestIntegration_SelftestFailureRejectsUpdate(t *testing.T) {
 
 func TestIntegration_ExecThroughChainCollapse(t *testing.T) {
 	tmpDir := t.TempDir()
-	binaryPath := filepath.Join(tmpDir, "testapp")
+	binaryName := daemonpilot.InstalledBinaryName("testapp")
+	binaryPath := filepath.Join(tmpDir, binaryName)
+	nextPath := filepath.Join(tmpDir, "testapp.next"+filepath.Ext(binaryName))
 	versionFile := filepath.Join(tmpDir, "version")
-
-	v2Script := fmt.Sprintf("#!/bin/sh\necho v2 > %s\nsleep 0.3\nexit 0\n", versionFile)
-	if err := os.WriteFile(binaryPath, []byte(v2Script), 0o755); err != nil {
-		t.Fatal(err)
-	}
-
-	v3Script := fmt.Sprintf("#!/bin/sh\necho v3 > %s\nsleep 30\n", versionFile)
+	releaseFile := filepath.Join(tmpDir, "release-v2")
+	buildExecThroughFixture(t, binaryPath, "v2")
+	buildExecThroughFixture(t, nextPath, "v3")
+	t.Setenv("FIXTURE_VERSION_FILE", versionFile)
+	t.Setenv("FIXTURE_RELEASE_FILE", releaseFile)
 
 	cfg := &daemonpilot.Config{
 		Name:            "testapp",
@@ -528,12 +526,9 @@ func TestIntegration_ExecThroughChainCollapse(t *testing.T) {
 		WorkerFunc:      func(ctx context.Context) error { <-ctx.Done(); return nil },
 		Logger:          discardLogger(),
 	}
-
 	w := watchdog.New(cfg)
-
 	ctx, cancel := context.WithTimeout(context.Background(), testsupport.Scale(15*time.Second))
 	defer cancel()
-
 	done := make(chan struct{})
 	go func() {
 		w.RunExecThroughChildExported(ctx)
@@ -555,43 +550,57 @@ func TestIntegration_ExecThroughChainCollapse(t *testing.T) {
 			}
 		}
 	}
+	stop := func() {
+		cancel()
+		select {
+		case <-done:
+		case <-time.After(testsupport.Scale(10 * time.Second)):
+			t.Fatal("proxy mode did not shut down")
+		}
+	}
 
 	if !waitForFile(versionFile, "v2", 5*time.Second) {
-		cancel()
-		<-done
+		stop()
 		t.Fatal("v2 child never started")
 	}
-
-	if err := os.WriteFile(binaryPath, []byte(v3Script), 0o755); err != nil {
-		cancel()
-		<-done
-		t.Fatalf("failed to write v3 binary: %v", err)
+	if err := os.WriteFile(releaseFile, []byte("release"), 0o600); err != nil {
+		stop()
+		t.Fatalf("release v2 child: %v", err)
+	}
+	if !waitForFile(versionFile+".done", "done", 5*time.Second) {
+		stop()
+		t.Fatal("v2 child did not exit")
 	}
 
+	replaced := false
+	deadline := time.Now().Add(testsupport.Scale(5 * time.Second))
+	for time.Now().Before(deadline) {
+		if err := os.Rename(nextPath, binaryPath); err == nil {
+			replaced = true
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if !replaced {
+		stop()
+		t.Fatal("could not replace the v2 executable with v3")
+	}
 	if !waitForFile(versionFile, "v3", 5*time.Second) {
-		cancel()
-		<-done
+		stop()
 		t.Fatal("v3 child never started after chain collapse")
 	}
-
-	data, err := os.ReadFile(versionFile)
-	if err != nil {
-		t.Fatalf("read version file: %v", err)
-	}
-	if strings.TrimSpace(string(data)) != "v3" {
-		t.Errorf("expected version v3, got %q", strings.TrimSpace(string(data)))
-	}
-
 	if !w.InProxyMode() {
 		t.Error("root watchdog should remain in proxy mode throughout chain collapse")
 	}
+	stop()
+}
 
-	cancel()
-
-	select {
-	case <-done:
-	case <-time.After(testsupport.Scale(10 * time.Second)):
-		t.Fatal("proxy mode did not shut down")
+func buildExecThroughFixture(t *testing.T, outputPath, version string) {
+	t.Helper()
+	flags := "-X main.version=" + version
+	cmd := exec.Command("go", "build", "-ldflags", flags, "-o", outputPath, "./testdata/execfixture")
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("build %s exec-through fixture: %v\n%s", version, err, output)
 	}
 }
 
@@ -602,4 +611,8 @@ func buildProcessFixture(t *testing.T) string {
 
 func integrationWorkerSpec(binary string, delay time.Duration, code int) procguard.Spec {
 	return procguard.Spec{Path: binary, Env: append(os.Environ(), "FIXTURE_DELAY="+delay.String(), fmt.Sprintf("FIXTURE_CODE=%d", code)), GracePeriod: 100 * time.Millisecond}
+}
+
+func integrationBinaryPath(dir string) string {
+	return filepath.Join(dir, daemonpilot.InstalledBinaryName("testapp"))
 }

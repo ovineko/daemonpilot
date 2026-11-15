@@ -306,6 +306,9 @@ func RestoreRollbackBinary(installDir, serviceName, rollbackPath, targetPath str
 	if err := copyIntoPlace(src, targetPath, mode, rollbackPath, recorded); err != nil {
 		return false, err
 	}
+	if err := src.Close(); err != nil {
+		return true, fmt.Errorf("closing the spent rollback copy %s: %w", rollbackPath, err)
+	}
 
 	// The copy is spent: it is the running binary now. Remove it and drop the
 	// record, so a later file at the rollback path cannot inherit the digest and

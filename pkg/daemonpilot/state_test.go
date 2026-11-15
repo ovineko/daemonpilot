@@ -23,13 +23,13 @@ func TestStateFilePath(t *testing.T) {
 			"standard path",
 			"/opt/myservice",
 			"myservice",
-			"/opt/myservice/.daemonpilot-myservice.json",
+			filepath.Join("/opt/myservice", ".daemonpilot-myservice.json"),
 		},
 		{
 			"different service name",
 			"/usr/local/bin",
 			"test-app",
-			"/usr/local/bin/.daemonpilot-test-app.json",
+			filepath.Join("/usr/local/bin", ".daemonpilot-test-app.json"),
 		},
 	}
 	for _, tt := range tests {

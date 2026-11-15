@@ -206,6 +206,9 @@ supported, and `go test -count=3 ./test/...` on Linux amd64/arm64, macOS 15 Inte
 and Windows 2025 amd64 plus Windows 11 arm64. Native service E2E runs on macOS and
 Windows; Windows runner privileges are required for SCM installation. Race detection
 runs on Windows amd64, not Windows arm64.
+Windows runs the Windows service-manifest tests and native SCM lifecycle journey. POSIX
+init-manager adapter tests and host-detection tests are constrained to non-Windows hosts;
+portable parser, scope, and shared API tests still run on Windows.
 
 `.github/workflows/platform-e2e.yml` runs on manual dispatch and a weekly schedule. It
 executes all untagged Go test packages inside Linux containers on amd64, arm64, riscv64,

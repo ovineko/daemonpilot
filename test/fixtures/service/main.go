@@ -17,8 +17,8 @@ import (
 )
 
 func main() {
-	dir := os.Getenv("DAEMONPILOT_NATIVE_DIR")
-	name := os.Getenv("DAEMONPILOT_NATIVE_NAME")
+	dir := os.Getenv("GO_DAEMONPILOT_NATIVE_DIR")
+	name := os.Getenv("GO_DAEMONPILOT_NATIVE_NAME")
 	if dir == "" || name == "" {
 		fmt.Fprintln(os.Stderr, "native fixture directory and service name are required")
 		os.Exit(2)
@@ -32,10 +32,10 @@ func main() {
 		InstallDir: dir,
 		Scope:      scope,
 		ServiceEnvironment: map[string]string{
-			"DAEMONPILOT_NATIVE_DIR":         dir,
-			"DAEMONPILOT_NATIVE_NAME":        name,
-			"DAEMONPILOT_NATIVE_RELEASE_URL": os.Getenv("DAEMONPILOT_NATIVE_RELEASE_URL"),
-			"DAEMONPILOT_NATIVE_PUBLIC_KEY":  os.Getenv("DAEMONPILOT_NATIVE_PUBLIC_KEY"),
+			"GO_DAEMONPILOT_NATIVE_DIR":         dir,
+			"GO_DAEMONPILOT_NATIVE_NAME":        name,
+			"GO_DAEMONPILOT_NATIVE_RELEASE_URL": os.Getenv("GO_DAEMONPILOT_NATIVE_RELEASE_URL"),
+			"GO_DAEMONPILOT_NATIVE_PUBLIC_KEY":  os.Getenv("GO_DAEMONPILOT_NATIVE_PUBLIC_KEY"),
 		},
 		HealthInterval: 200 * time.Millisecond,
 		HealthFailures: 3,
@@ -74,8 +74,8 @@ func main() {
 			}
 		},
 	}
-	if releaseURL := os.Getenv("DAEMONPILOT_NATIVE_RELEASE_URL"); releaseURL != "" {
-		publicKey, err := hex.DecodeString(os.Getenv("DAEMONPILOT_NATIVE_PUBLIC_KEY"))
+	if releaseURL := os.Getenv("GO_DAEMONPILOT_NATIVE_RELEASE_URL"); releaseURL != "" {
+		publicKey, err := hex.DecodeString(os.Getenv("GO_DAEMONPILOT_NATIVE_PUBLIC_KEY"))
 		if err != nil || len(publicKey) != ed25519.PublicKeySize {
 			fmt.Fprintln(os.Stderr, "invalid native update public key")
 			os.Exit(2)

@@ -3,6 +3,7 @@ package daemonpilot
 import (
 	"errors"
 	"os"
+	"path"
 	"path/filepath"
 
 	"github.com/ovineko/daemonpilot/internal/daemon"
@@ -51,15 +52,22 @@ var ErrNoHomeDir = errors.New("daemonpilot: user scope requires a home directory
 // package makes; the linger user name is resolved inside internal/daemon.
 var userHomeDir = os.UserHomeDir
 
+func joinTargetOSPath(goos string, parts ...string) string {
+	if goos == "windows" {
+		return filepath.Join(parts...)
+	}
+	return path.Join(parts...)
+}
+
 // defaultInstallDir returns the install directory for the given OS and scope.
 // The home argument is only consulted for ScopeUser; callers must reject an
 // empty home before calling with ScopeUser.
 func defaultInstallDir(goos, name string, scope InstallScope, home string) string {
 	if scope == ScopeUser {
 		if goos == "darwin" {
-			return filepath.Join(home, "Library", "Application Support", name)
+			return joinTargetOSPath(goos, home, "Library", "Application Support", name)
 		}
-		return filepath.Join(home, ".local", "share", name)
+		return joinTargetOSPath(goos, home, ".local", "share", name)
 	}
 	if goos == "darwin" {
 		return "/usr/local/bin"
@@ -77,7 +85,7 @@ func defaultLogDir(goos, name string, scope InstallScope, home string) string {
 		return ""
 	}
 	if goos == "darwin" {
-		return filepath.Join(home, "Library", "Logs", name)
+		return joinTargetOSPath(goos, home, "Library", "Logs", name)
 	}
-	return filepath.Join(home, ".local", "state", name)
+	return joinTargetOSPath(goos, home, ".local", "state", name)
 }

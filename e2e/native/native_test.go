@@ -91,16 +91,18 @@ func TestNativeServiceLifecycle(t *testing.T) {
 	releases := httptest.NewServer(handler)
 	t.Cleanup(releases.Close)
 	env := []string{
-		"DAEMONPILOT_NATIVE_DIR=" + installDir,
-		"DAEMONPILOT_NATIVE_NAME=" + name,
-		"DAEMONPILOT_NATIVE_RELEASE_URL=" + releases.URL,
-		"DAEMONPILOT_NATIVE_PUBLIC_KEY=" + hex.EncodeToString(publicKey),
+		"GO_DAEMONPILOT_NATIVE_DIR=" + installDir,
+		"GO_DAEMONPILOT_NATIVE_NAME=" + name,
+		"GO_DAEMONPILOT_NATIVE_RELEASE_URL=" + releases.URL,
+		"GO_DAEMONPILOT_NATIVE_PUBLIC_KEY=" + hex.EncodeToString(publicKey),
 	}
+	logDir := ""
 	if runtime.GOOS == "darwin" {
 		home := filepath.Join(root, "home")
 		if err := os.MkdirAll(home, 0o700); err != nil {
 			t.Fatal(err)
 		}
+		logDir = filepath.Join(home, "Library", "Logs", name)
 		env = append(env, "HOME="+home)
 		t.Setenv("HOME", home)
 	}
@@ -144,7 +146,9 @@ func TestNativeServiceLifecycle(t *testing.T) {
 		t.Fatalf("install: %v", err)
 	}
 	workerPath := filepath.Join(installDir, "worker.json")
-	await(t, "worker identity after install", func() bool { return workerStateAt(workerPath, 0) })
+	await(t, "worker identity after install", func() bool { return workerStateAt(workerPath, 0) }, func() string {
+		return nativeServiceDiagnostics(name, mgr.GetManifestPath(), logDir)
+	})
 	first := readWorker(t, workerPath)
 	if first.PID <= 0 || first.WatchdogPID <= 0 {
 		t.Fatalf("invalid worker identity: %+v", first)
@@ -240,7 +244,7 @@ func buildFixture(t *testing.T, output, version, watchdogVersion string) {
 	}
 }
 
-func await(t *testing.T, what string, condition func() bool) {
+func await(t *testing.T, what string, condition func() bool, diagnostics ...func() string) {
 	t.Helper()
 	deadline := time.Now().Add(nativeDeadline)
 	for time.Now().Before(deadline) {
@@ -253,7 +257,39 @@ func await(t *testing.T, what string, condition func() bool) {
 			t.Fatalf("waiting for %s: %v", what, t.Context().Err())
 		}
 	}
+	if len(diagnostics) != 0 {
+		t.Fatalf("timed out waiting for %s: %s", what, diagnostics[0]())
+	}
 	t.Fatalf("timed out waiting for %s", what)
+}
+
+func nativeServiceDiagnostics(name, manifestPath, logDir string) string {
+	manifest, manifestErr := os.ReadFile(manifestPath)
+	var output []byte
+	var commandErr error
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	switch runtime.GOOS {
+	case "windows":
+		output, commandErr = exec.CommandContext(ctx, "sc.exe", "query", name).CombinedOutput()
+	case "darwin":
+		account, err := user.Current()
+		if err != nil {
+			commandErr = err
+		} else {
+			for _, domain := range []string{"gui/" + account.Uid, "user/" + account.Uid} {
+				output, commandErr = exec.CommandContext(ctx, "launchctl", "print", domain+"/com."+name).CombinedOutput()
+				if commandErr == nil {
+					break
+				}
+			}
+		}
+	default:
+		output, commandErr = exec.CommandContext(ctx, "systemctl", "status", name).CombinedOutput()
+	}
+	stderr, stderrErr := os.ReadFile(filepath.Join(logDir, name+".err.log"))
+	stdout, stdoutErr := os.ReadFile(filepath.Join(logDir, name+".out.log"))
+	return fmt.Sprintf("manifest=%q (read: %v), service output=%q (command: %v), stdout=%q (read: %v), stderr=%q (read: %v)", manifest, manifestErr, output, commandErr, stdout, stdoutErr, stderr, stderrErr)
 }
 
 func workerStateAt(path string, previousPID int) bool {
