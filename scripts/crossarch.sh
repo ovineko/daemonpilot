@@ -54,7 +54,7 @@ cd "$root"
 status=0
 while IFS= read -r package; do
   relative=${package#github.com/ovineko/daemonpilot/}
-  (cd "$root/$relative" && "$root/$arch/$relative/suite.test" -test.v -test.timeout=0) || status=1
+  (cd "$root/$relative" && "$root/$arch/$relative/suite.test" -test.v -test.timeout=30m) || status=1
 done < "$root/packages"
 if [ "$status" -eq 0 ]; then echo "linux/$arch PASS"; else echo "linux/$arch FAIL"; fi
 exit "$status"

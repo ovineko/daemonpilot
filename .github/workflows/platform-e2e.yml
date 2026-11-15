@@ -1,0 +1,167 @@
+env:
+  GOWORK: "off"
+jobs:
+  crossbuild:
+    name: Cross-build BSD test bundles
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.1.0
+        with:
+          cache: true
+          go-version-file: go.mod
+      - name: Build complete BSD test bundles
+        run: scripts/bsdvm.sh pack "$RUNNER_TEMP/bsdvm.tar.gz"
+      - name: Upload BSD bundles
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          if-no-files-found: error
+          name: bsdvm-test-bundles
+          path: ${{ runner.temp }}/bsdvm.tar.gz
+          retention-days: 1
+    timeout-minutes: 90
+  dragonfly:
+    name: DragonFly BSD amd64 native test suites
+    needs: crossbuild
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download BSD bundles
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: bsdvm-test-bundles
+          path: ${{ github.workspace }}/.bsdvm
+      - name: Extract BSD bundles
+        run: tar -xzf "$GITHUB_WORKSPACE/.bsdvm/bsdvm.tar.gz" -C "$GITHUB_WORKSPACE/.bsdvm"
+      - name: Run tests in native guest
+        uses: vmactions/dragonflybsd-vm@4ab776fa9f914fbea72f13715b451e77e7ef5c41 # v1.3.4
+        with:
+          arch: amd64
+          copyback: false
+          cpu: 4
+          mem: 6144
+          release: "6.4.2"
+          run: |
+            set -eu
+            "$GITHUB_WORKSPACE/.bsdvm/run.sh"
+    timeout-minutes: 120
+  freebsd:
+    name: FreeBSD ${{ matrix.arch }} native test suites
+    needs: crossbuild
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download BSD bundles
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: bsdvm-test-bundles
+          path: ${{ github.workspace }}/.bsdvm
+      - name: Extract BSD bundles
+        run: tar -xzf "$GITHUB_WORKSPACE/.bsdvm/bsdvm.tar.gz" -C "$GITHUB_WORKSPACE/.bsdvm"
+      - name: Run tests in native guest
+        uses: vmactions/freebsd-vm@811efaaac0668df8bfb8308c3ec997b5ab50037b # v1.6.0
+        with:
+          arch: ${{ matrix.arch }}
+          copyback: false
+          cpu: 4
+          mem: 6144
+          release: "15.1"
+          run: |
+            set -eu
+            "$GITHUB_WORKSPACE/.bsdvm/run.sh"
+    strategy:
+      fail-fast: false
+      matrix:
+        arch:
+          - amd64
+          - aarch64
+    timeout-minutes: 120
+  linux-runtime:
+    name: Linux five-architecture runtime suites
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.1.0
+        with:
+          cache: true
+          go-version-file: go.mod
+      - name: Register QEMU handlers
+        uses: docker/setup-qemu-action@29109295f81e9208d7d86ff1c6c12d2833863392 # v3.6.0
+        with:
+          platforms: amd64,arm64,riscv64,arm,386
+      - name: Run complete Linux runtime suites
+        run: scripts/crossarch.sh docker
+    timeout-minutes: 120
+  netbsd:
+    name: NetBSD ${{ matrix.arch }} native test suites
+    needs: crossbuild
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download BSD bundles
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: bsdvm-test-bundles
+          path: ${{ github.workspace }}/.bsdvm
+      - name: Extract BSD bundles
+        run: tar -xzf "$GITHUB_WORKSPACE/.bsdvm/bsdvm.tar.gz" -C "$GITHUB_WORKSPACE/.bsdvm"
+      - name: Run tests in native guest
+        uses: vmactions/netbsd-vm@5957cf330aef2e6ddc63c604364c99ce2e02b91d # v1.5.3
+        with:
+          arch: ${{ matrix.arch }}
+          copyback: false
+          cpu: 4
+          mem: 6144
+          release: "11.1"
+          run: |
+            set -eu
+            "$GITHUB_WORKSPACE/.bsdvm/run.sh"
+    strategy:
+      fail-fast: false
+      matrix:
+        arch:
+          - amd64
+          - aarch64
+    timeout-minutes: 120
+  openbsd:
+    name: OpenBSD ${{ matrix.arch }} native test suites
+    needs: crossbuild
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download BSD bundles
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: bsdvm-test-bundles
+          path: ${{ github.workspace }}/.bsdvm
+      - name: Extract BSD bundles
+        run: tar -xzf "$GITHUB_WORKSPACE/.bsdvm/bsdvm.tar.gz" -C "$GITHUB_WORKSPACE/.bsdvm"
+      - name: Run tests in native guest
+        uses: vmactions/openbsd-vm@f1ca8bc8ecc5b6ef7218e5b914836e067e1546d3 # v1.4.9
+        with:
+          arch: ${{ matrix.arch }}
+          copyback: false
+          cpu: 4
+          mem: 6144
+          release: "8.0"
+          run: |
+            set -eu
+            "$GITHUB_WORKSPACE/.bsdvm/run.sh"
+    strategy:
+      fail-fast: false
+      matrix:
+        arch:
+          - amd64
+          - aarch64
+    timeout-minutes: 120
+name: Platform runtime E2E
+on:
+  schedule:
+    - cron: "23 6 * * 6"
+  workflow_dispatch:
+permissions:
+  contents: read

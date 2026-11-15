@@ -70,14 +70,14 @@ GOOS=windows GOARCH=amd64         go build -o myapp-windows-amd64.exe
 
 For release builds, add the version-injection flags from the preceding section.
 
-CI cross-compiles linux, darwin, freebsd, openbsd and windows on amd64 and arm64.
-Compilation does not establish native runtime support on every target:
-freebsd and openbsd have no native init-system provider, so
-detection falls through to the crontab provider, which installs an `@reboot`
-entry instead of a native service. Windows supports machine-wide SCM services:
-`install`, `uninstall`, `start`, `stop`, `restart`, `enable`, `disable`, `status`,
-`validate`, and `update-config`. The service runs as LocalSystem, starts
-automatically, reports SCM lifecycle status, and has restart recovery configured.
+CI cross-compiles Linux, Darwin, FreeBSD, OpenBSD and Windows on amd64 and arm64. It
+also executes unit and integration tests on Linux amd64/arm64, macOS Intel/arm64,
+Windows amd64/arm64, and native BSD guest VMs (DragonFly amd64 only). Native lifecycle
+E2E covers Windows SCM and macOS launchd; Linux Docker E2E covers supported Linux init
+systems. These checks do not imply that every OS has a native service manager:
+FreeBSD and OpenBSD currently use the crontab provider, which installs an `@reboot`
+entry. Windows supports machine-wide SCM services: `install`, `uninstall`, `start`,
+`stop`, `restart`, `enable`, `disable`, `status`, `validate`, and `update-config`.
 Console `run` and `worker` also work.
 
 Windows user scope, per-service environment settings, and POSIX `ServiceUser` /

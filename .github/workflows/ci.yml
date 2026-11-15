@@ -69,7 +69,10 @@ jobs:
   test:
     defaults:
       run:
+        shell: bash
         working-directory: daemonpilot
+    env:
+      CGO_ENABLED: ${{ matrix.cgo }}
     name: Test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     steps:
@@ -83,18 +86,69 @@ jobs:
         with:
           cache-dependency-path: daemonpilot/go.sum
           go-version-file: daemonpilot/go.mod
+      - name: Runtime identity
+        run: |
+          go version
+          go env GOOS GOARCH CGO_ENABLED
+      - if: runner.os == 'Windows' && matrix.race
+        name: Setup MinGW race runtime
+        uses: msys2/setup-msys2@ec48f7c5447b3140e2b088413ae3a55687bccb6e # v2.33.0
+        with:
+          install: mingw-w64-ucrt-x86_64-gcc
+          msystem: UCRT64
+          path-type: inherit
+      - if: runner.os == 'Windows' && matrix.race
+        name: Check Windows race compiler
+        run: |
+          gcc --version
+          library=$(gcc --print-file-name=libsynchronization.a)
+          test "$library" != libsynchronization.a
+          test -f "$library"
+      - name: Build
+        run: go build ./...
       - name: Vet
         run: go vet ./...
       - name: Test
-        run: go test ./...
-      - name: Test with race detector
-        run: go test -race ./...
+        run: go test -count=1 -timeout 15m ./...
+      - name: Real-process integration journeys
+        run: go test -count=3 -timeout 10m ./test/...
+      - if: matrix.race
+        name: Test with race detector
+        run: go test -race -count=1 -timeout 15m ./...
+      - env:
+          DAEMONPILOT_E2E_REQUIRE: "1"
+        if: matrix.service
+        name: Native service lifecycle and signed updates
+        run: go test -tags e2e_native -count=1 -v -timeout 20m ./e2e/native
     strategy:
       fail-fast: false
       matrix:
-        os:
-          - ubuntu-latest
-          - macos-latest
+        include:
+          - cgo: "1"
+            os: ubuntu-24.04
+            race: true
+            service: false
+          - cgo: "1"
+            os: ubuntu-24.04-arm
+            race: true
+            service: false
+          - cgo: "1"
+            os: macos-15-intel
+            race: true
+            service: true
+          - cgo: "1"
+            os: macos-15
+            race: true
+            service: true
+          - cgo: "1"
+            os: windows-2025
+            race: true
+            service: true
+          - cgo: "0"
+            os: windows-11-arm
+            race: false
+            service: true
+    timeout-minutes: 60
 name: CI
 on:
   pull_request: {}
