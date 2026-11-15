@@ -2,10 +2,11 @@
 
 ## Layers and commands
 
-Unit tests exercise policy and platform adapters. Unix datagram notification
-tests skip only when the host denies socket creation or reports `ENOSYS`;
-unrelated listen errors remain failures. Integration journeys build fixture
-binaries in temporary directories and exercise real processes and files.
+Unit tests exercise policy and platform adapters. Filesystem Unix datagram
+notification tests skip only when the host denies socket creation or reports
+`ENOSYS`; the NUL-prefixed abstract-socket test is Linux-only. Other listen errors
+remain failures. Integration journeys build fixture binaries in temporary directories
+and exercise real processes and files.
 The Docker lifecycle layer adds a Linux PID namespace and two real userlands.
 The real-init layer adds installation, container-reboot persistence, and
 service-manager restart contracts (see the matrix below).
