@@ -1898,6 +1898,16 @@ func TestApplyFastUpdate_SyncsInstallDirAfterRename(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
+	data, err := os.ReadFile(currentPath)
+	if err != nil || string(data) != "new-binary" {
+		t.Fatalf("installed binary = %q, %v; want new-binary", data, err)
+	}
+	if runtime.GOOS == "windows" {
+		if len(*events) != 0 {
+			t.Errorf("Windows must not sync the install directory, got %v", *events)
+		}
+		return
+	}
 	if len(*events) != 1 || (*events)[0] != "dir:"+tmpDir {
 		t.Errorf("sync events = %v, want [dir:%s]", *events, tmpDir)
 	}
@@ -1917,12 +1927,32 @@ func TestApplyFastUpdate_DirSyncFailureIsNotFatal(t *testing.T) {
 
 	orig := syncDir
 	t.Cleanup(func() { syncDir = orig })
-	syncDir = func(dir string) error { return errors.New("fsync unsupported") }
+	syncCalls := 0
+	syncDir = func(string) error {
+		syncCalls++
+		return errors.New("fsync unsupported")
+	}
 
 	var buf bytes.Buffer
 	u := New(&daemonpilot.UpdateConfig{}, newTestLoggerWithBuffer(&buf), tmpDir, "myapp")
 	if err := u.ApplyFastUpdate(context.Background(), newPath); err != nil {
-		t.Fatalf("a failed directory sync must not fail an applied update: %v", err)
+		t.Fatalf("directory sync must not fail an applied update: %v", err)
+	}
+	data, err := os.ReadFile(currentPath)
+	if err != nil || string(data) != "new-binary" {
+		t.Fatalf("installed binary = %q, %v; want new-binary", data, err)
+	}
+	if runtime.GOOS == "windows" {
+		if syncCalls != 0 {
+			t.Errorf("Windows must not sync the install directory, got %d calls", syncCalls)
+		}
+		if contains(buf.String(), "failed to sync the install directory") {
+			t.Error("Windows should not report a directory sync warning")
+		}
+		return
+	}
+	if syncCalls != 1 {
+		t.Errorf("directory sync calls = %d, want 1", syncCalls)
 	}
 	if !contains(buf.String(), "failed to sync the install directory") {
 		t.Error("expected a warning about the failed directory sync")

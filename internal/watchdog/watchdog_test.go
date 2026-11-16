@@ -1753,9 +1753,11 @@ func TestHealthCheck_ResetsAfterWorkerRestart(t *testing.T) {
 	cfg.HealthFailures = 2
 	cfg.MaxRestartDelay = 10 * time.Millisecond
 
-	var restartSeen atomic.Bool
+	var replacementStarted atomic.Bool
+	var healthyChecks atomic.Int32
 	cfg.HealthFunc = func(_ context.Context) error {
-		if restartSeen.Load() {
+		if replacementStarted.Load() {
+			healthyChecks.Add(1)
 			return nil
 		}
 		return errors.New("unhealthy")
@@ -1765,11 +1767,15 @@ func TestHealthCheck_ResetsAfterWorkerRestart(t *testing.T) {
 	w := New(cfg)
 	w.SetSpecFunc(func(_ context.Context) (procguard.Spec, error) {
 		n := spawnCount.Add(1)
+		spec := helperSpec(10*time.Second, 0)
 		if n >= 2 {
-			restartSeen.Store(true)
+			spec.AfterStart = func(_ int, startErr error) {
+				if startErr == nil {
+					replacementStarted.Store(true)
+				}
+			}
 		}
-		cmd := helperSpec(10*time.Second, 0)
-		return cmd, nil
+		return spec, nil
 	})
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -1778,9 +1784,10 @@ func TestHealthCheck_ResetsAfterWorkerRestart(t *testing.T) {
 		done <- w.Run(ctx)
 	}()
 
-	// The health-driven restart is the event under test; the mock only starts reporting
-	// healthy once it has happened, so wait for the respawn rather than for a duration.
-	waitFor(t, "the health-driven worker restart", restartSeen.Load)
+	waitFor(t, "the replacement worker to start", replacementStarted.Load)
+	waitFor(t, "a healthy post-restart check to clear failures", func() bool {
+		return healthyChecks.Load() > 0 && w.HealthFailures() == 0
+	})
 	cancel()
 
 	select {
@@ -1788,10 +1795,8 @@ func TestHealthCheck_ResetsAfterWorkerRestart(t *testing.T) {
 	case <-time.After(testsupport.Scale(waitTimeout)):
 		t.Fatal("Run() did not return")
 	}
-
-	failures := w.HealthFailures()
-	if failures != 0 {
-		t.Errorf("expected 0 health failures after restart + healthy checks, got %d", failures)
+	if failures := w.HealthFailures(); failures != 0 {
+		t.Errorf("health failures after restart and healthy check = %d, want 0", failures)
 	}
 }
 

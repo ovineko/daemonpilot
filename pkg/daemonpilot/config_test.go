@@ -81,6 +81,7 @@ func TestConfigValidate_AllowsCronMetacharactersOutsideCrontab(t *testing.T) {
 	root := t.TempDir()
 	cfg := Config{
 		Name:               "test",
+		WorkerFunc:         dummyWorker,
 		LogDir:             filepath.Join(root, "var", "log", "%Y"),
 		InstallDir:         filepath.Join(root, "opt", "100%"),
 		ServiceArguments:   []string{"--url=https://example.test/a%20b"},
