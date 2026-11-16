@@ -1140,15 +1140,19 @@ func TestHandleUninstall(t *testing.T) {
 				loadStateFn = installedState("testapp")
 
 				binaryPath := filepath.Join(installDir, InstalledBinaryName("testapp"))
+				lockPath := filepath.Join(installDir, "testapp.lock")
 				// #nosec G306 -- Executable fixture owned by this test.
 				if err := os.WriteFile(binaryPath, []byte("binary"), 0o755); err != nil {
 					t.Fatal(err)
 				}
 				for _, suffix := range tt.present {
 					artifactPath := binaryPath
-					if suffix == ".new" {
+					switch suffix {
+					case ".lock":
+						artifactPath = lockPath
+					case ".new":
 						artifactPath = StagedNewPath(binaryPath)
-					} else {
+					default:
 						artifactPath += suffix
 					}
 					// #nosec G306 -- Executable fixture owned by this test.
@@ -1178,13 +1182,17 @@ func TestHandleUninstall(t *testing.T) {
 					t.Fatalf("unexpected error: %v", err)
 				}
 
-				for _, suffix := range []string{".lock", ".rollback", ".rollback.invalid"} {
-					if _, err := os.Stat(binaryPath + suffix); !os.IsNotExist(err) {
-						t.Errorf("expected %s to be removed, stat error = %v", binaryPath+suffix, err)
+				for _, suffix := range []string{".rollback", ".rollback.invalid"} {
+					path := binaryPath + suffix
+					if _, err := os.Stat(path); !os.IsNotExist(err) {
+						t.Errorf("expected %s to be removed, stat error = %v", path, err)
 					}
 				}
 				if _, err := os.Stat(StagedNewPath(binaryPath)); !os.IsNotExist(err) {
 					t.Errorf("expected %s to be removed, stat error = %v", StagedNewPath(binaryPath), err)
+				}
+				if _, err := os.Stat(lockPath); !os.IsNotExist(err) {
+					t.Errorf("expected %s to be removed, stat error = %v", lockPath, err)
 				}
 				if _, err := os.Stat(manifestBackup); !os.IsNotExist(err) {
 					t.Errorf("expected %s to be removed, stat error = %v", manifestBackup, err)
