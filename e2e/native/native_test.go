@@ -122,7 +122,7 @@ func TestNativeServiceLifecycle(t *testing.T) {
 	}
 	managerName, scope := "launchd", daemon.ScopeUser
 	if runtime.GOOS == "windows" {
-		managerName, scope = "windows", daemon.ScopeSystem
+		managerName, scope = "windows-service", daemon.ScopeSystem
 	}
 	mgr, err := daemon.NewServiceManagerByName(managerName)
 	if err != nil {
