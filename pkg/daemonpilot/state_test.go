@@ -571,6 +571,9 @@ func TestRestoreRollbackBinary(t *testing.T) {
 	if _, err := os.Lstat(targetPath + ".restore"); !os.IsNotExist(err) {
 		t.Errorf("the staging file survived the restore: %v", err)
 	}
+	if _, err := os.Lstat(StagedNewPath(targetPath)); !os.IsNotExist(err) {
+		t.Errorf("the aside binary survived the restore: %v", err)
+	}
 	state, err := LoadState(dir, name)
 	if err != nil {
 		t.Fatal(err)

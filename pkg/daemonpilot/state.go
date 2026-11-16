@@ -382,7 +382,7 @@ func copyIntoPlace(src io.Reader, targetPath string, mode os.FileMode, srcPath, 
 		_ = os.Remove(tmpPath)
 		return fmt.Errorf("closing %s: %w", tmpPath, err)
 	}
-	if err := os.Rename(tmpPath, targetPath); err != nil {
+	if err := replaceRestoredBinary(tmpPath, targetPath); err != nil {
 		_ = os.Remove(tmpPath)
 		return fmt.Errorf("restoring %s: %w", targetPath, err)
 	}
