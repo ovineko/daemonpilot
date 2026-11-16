@@ -81,6 +81,39 @@ func TestGenerateAndParseWindowsServiceConfig(t *testing.T) {
 	}
 }
 
+func TestUpdateWindowsServiceImagePathPreservesArgumentsAndUnknownFields(t *testing.T) {
+	content := "# daemonpilot windows service definition\r\n" +
+		"Name=sample-agent\r\n" +
+		"DisplayName=sample agent\r\n" +
+		"Description=sample host agent\r\n" +
+		"FutureField=preserve me\r\n" +
+		"BinaryPath=\"C:\\Program Files\\sample\\sample-agent.exe\" run --arg=with space\r\n" +
+		"ImagePath=C:\\Program Files\\sample\\sample-agent.exe\r\n" +
+		"Argument=run\r\n" +
+		"Argument=--arg=with space\r\n"
+	newPath := `C:\Program Files\sample\sample-agent.exe.rollback`
+	updated, err := updateWindowsServiceImagePath(content, newPath)
+	if err != nil {
+		t.Fatalf("updateWindowsServiceImagePath: %v", err)
+	}
+	if !strings.Contains(updated, "FutureField=preserve me\r\n") {
+		t.Fatalf("unknown manifest field was dropped: %q", updated)
+	}
+	def, err := parseWindowsServiceConfig(updated)
+	if err != nil {
+		t.Fatalf("parse updated config: %v", err)
+	}
+	if def.ImagePath != newPath {
+		t.Errorf("ImagePath = %q, want %q", def.ImagePath, newPath)
+	}
+	if def.BinaryPath != WindowsCommandLine(newPath, def.Arguments) {
+		t.Errorf("BinaryPath = %q, want the path plus preserved arguments", def.BinaryPath)
+	}
+	if len(def.Arguments) != 2 || def.Arguments[0] != "run" || def.Arguments[1] != "--arg=with space" {
+		t.Errorf("arguments changed: %q", def.Arguments)
+	}
+}
+
 // TestGenerateWindowsServiceConfigIsDeterministic: the rendering is hashed for the
 // rollback digest, so an unstable one reports drift on every reconcile of a service
 // nobody touched.

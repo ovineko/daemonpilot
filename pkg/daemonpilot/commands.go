@@ -1150,6 +1150,19 @@ func removeInstallArtifacts(binaryPath string, logger Logger) {
 	if staged := StagedNewPath(binaryPath); staged != LegacyStagedNewPath(binaryPath) {
 		removeInstallArtifact(staged, logger)
 	}
+	entries, err := os.ReadDir(filepath.Dir(binaryPath))
+	if err != nil {
+		if !errors.Is(err, fs.ErrNotExist) {
+			logger.Warn("failed to inspect superseded binaries", "path", filepath.Dir(binaryPath), "error", err.Error())
+		}
+		return
+	}
+	prefix := filepath.Base(binaryPath) + SupersededBinarySuffix
+	for _, entry := range entries {
+		if !entry.IsDir() && strings.HasPrefix(entry.Name(), prefix) {
+			removeInstallArtifact(filepath.Join(filepath.Dir(binaryPath), entry.Name()), logger)
+		}
+	}
 }
 
 // removeInstallArtifact deletes one leftover file, tolerating absence and
@@ -1195,6 +1208,35 @@ func logStateDivergence(cfg *Config, logger Logger) {
 			"configured_install_dir", cfg.InstallDir,
 		)
 	}
+}
+
+func recoverInterruptedWindowsRollback(cfg *Config, logger Logger) (bool, error) {
+	if !isRollbackRecoveryExecutable(cfg) {
+		return false, nil
+	}
+	binaryPath := installedBinaryPath(cfg)
+	logger.Info("recovering an interrupted Windows rollback",
+		"phase", "update", "step", "rollback_recovery", "outcome", "started",
+		"service_name", cfg.Name, "install_dir", cfg.InstallDir)
+	restored, restoreErr := RestoreRollbackBinary(cfg.InstallDir, cfg.Name, binaryPath+".rollback", binaryPath)
+	if !restored {
+		if restoreErr == nil {
+			restoreErr = errors.New("rollback recovery image was not restored")
+		}
+		logger.Error("interrupted Windows rollback could not be recovered",
+			"phase", "update", "step", "rollback_recovery", "outcome", "failed",
+			"service_name", cfg.Name, "install_dir", cfg.InstallDir, "error", restoreErr.Error())
+		return true, fmt.Errorf("recovering interrupted Windows rollback: %w", restoreErr)
+	}
+	if restoreErr != nil {
+		logger.Warn("restored the installed binary from the SCM recovery image; rollback cleanup will retry after restart",
+			"phase", "update", "step", "rollback_recovery", "outcome", "degraded",
+			"service_name", cfg.Name, "install_dir", cfg.InstallDir, "error", restoreErr.Error())
+	}
+	logger.Info("recovered interrupted Windows rollback; restarting from the canonical binary",
+		"phase", "update", "step", "rollback_recovery", "outcome", "succeeded",
+		"service_name", cfg.Name, "install_dir", cfg.InstallDir)
+	return true, ErrExecRestart
 }
 
 func handleRun(cfg *Config) error {
@@ -1255,6 +1297,9 @@ func handleRun(cfg *Config) error {
 
 	ctx, cancel := setupSignalHandler(context.Background())
 	defer cancel()
+	if recovered, err := recoverInterruptedWindowsRollback(cfg, logger); recovered {
+		return err
+	}
 
 	if cfg.Update != nil {
 		if newUpdaterFn == nil {

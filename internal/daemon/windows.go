@@ -5,8 +5,10 @@ package daemon
 import (
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
+	"path/filepath"
 	"time"
 
 	"golang.org/x/sys/windows"
@@ -329,6 +331,94 @@ func (m *windowsManager) ReadInstalledConfig() (string, error) {
 		return "", fmt.Errorf("reading service definition: %w", err)
 	}
 	return string(data), nil
+}
+
+// UpdateBinaryPath changes only the executable path, retaining the service
+// arguments and any forward-compatible manifest fields.
+func (m *windowsManager) UpdateBinaryPath(imagePath string) error {
+	content, err := m.ReadInstalledConfig()
+	if err != nil {
+		return err
+	}
+	oldDefinition, err := parseWindowsServiceConfig(content)
+	if err != nil {
+		return err
+	}
+	updated, err := updateWindowsServiceImagePath(content, imagePath)
+	if err != nil {
+		return fmt.Errorf("updating service image path: %w", err)
+	}
+	newDefinition, err := parseWindowsServiceConfig(updated)
+	if err != nil {
+		return err
+	}
+	manifestPath := m.GetManifestPath()
+	if err := writeWindowsManifestAtomically(manifestPath, updated); err != nil {
+		return fmt.Errorf("writing updated service definition: %w", err)
+	}
+	if err := m.applyDefinition(newDefinition); err != nil {
+		fileErr := writeWindowsManifestAtomically(manifestPath, content)
+		scmErr := m.applyDefinition(oldDefinition)
+		if fileErr != nil || scmErr != nil {
+			return errors.Join(
+				fmt.Errorf("updating service image path: %w", err),
+				wrapOptionalError("restoring the previous service manifest", fileErr),
+				wrapOptionalError("restoring the previous SCM image path", scmErr),
+			)
+		}
+		return fmt.Errorf("updating service image path: %w", err)
+	}
+	return nil
+}
+
+func writeWindowsManifestAtomically(path, content string) error {
+	file, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+".tmp.*")
+	if err != nil {
+		return fmt.Errorf("creating temporary service manifest: %w", err)
+	}
+	tmpPath := file.Name()
+	cleanup := func() { _ = os.Remove(tmpPath) }
+	if err := file.Chmod(0o644); err != nil {
+		_ = file.Close()
+		cleanup()
+		return fmt.Errorf("setting service manifest permissions: %w", err)
+	}
+	if _, err := io.WriteString(file, content); err != nil {
+		_ = file.Close()
+		cleanup()
+		return fmt.Errorf("writing temporary service manifest: %w", err)
+	}
+	if err := file.Sync(); err != nil {
+		_ = file.Close()
+		cleanup()
+		return fmt.Errorf("syncing temporary service manifest: %w", err)
+	}
+	if err := file.Close(); err != nil {
+		cleanup()
+		return fmt.Errorf("closing temporary service manifest: %w", err)
+	}
+	from, err := windows.UTF16PtrFromString(tmpPath)
+	if err != nil {
+		cleanup()
+		return fmt.Errorf("encoding temporary service manifest path: %w", err)
+	}
+	to, err := windows.UTF16PtrFromString(path)
+	if err != nil {
+		cleanup()
+		return fmt.Errorf("encoding service manifest path: %w", err)
+	}
+	if err := windows.MoveFileEx(from, to, windows.MOVEFILE_REPLACE_EXISTING|windows.MOVEFILE_WRITE_THROUGH); err != nil {
+		cleanup()
+		return fmt.Errorf("publishing service manifest: %w", err)
+	}
+	return nil
+}
+
+func wrapOptionalError(message string, err error) error {
+	if err == nil {
+		return nil
+	}
+	return fmt.Errorf("%s: %w", message, err)
 }
 
 // CanRestartWatchdog is true because setRecovery configures the SCM to restart the

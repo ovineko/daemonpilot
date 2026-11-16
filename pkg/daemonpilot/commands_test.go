@@ -1117,7 +1117,7 @@ func TestHandleUninstall(t *testing.T) {
 			name    string
 			present []string
 		}{
-			{name: "all artifacts present", present: []string{".lock", ".new", ".rollback", ".rollback.invalid"}},
+			{name: "all artifacts present", present: []string{".lock", ".new", ".rollback", ".rollback.invalid", ".superseded-old"}},
 			{name: "only rollback present", present: []string{".rollback"}},
 			{name: "no artifacts present", present: nil},
 		}
@@ -1190,6 +1190,9 @@ func TestHandleUninstall(t *testing.T) {
 				}
 				if _, err := os.Stat(StagedNewPath(binaryPath)); !os.IsNotExist(err) {
 					t.Errorf("expected %s to be removed, stat error = %v", StagedNewPath(binaryPath), err)
+				}
+				if _, err := os.Stat(binaryPath + SupersededBinarySuffix + "old"); !os.IsNotExist(err) {
+					t.Errorf("expected superseded image to be removed, stat error = %v", err)
 				}
 				if _, err := os.Stat(lockPath); !os.IsNotExist(err) {
 					t.Errorf("expected %s to be removed, stat error = %v", lockPath, err)

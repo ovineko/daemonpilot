@@ -303,7 +303,7 @@ func RestoreRollbackBinary(installDir, serviceName, rollbackPath, targetPath str
 	if err != nil {
 		return false, err
 	}
-	if err := copyIntoPlace(src, targetPath, mode, rollbackPath, recorded); err != nil {
+	if err := copyIntoPlace(src, targetPath, mode, rollbackPath, recorded, installDir, serviceName); err != nil {
 		return false, err
 	}
 	if err := src.Close(); err != nil {
@@ -335,16 +335,17 @@ func executableMode(f *os.File, path string) (os.FileMode, error) {
 	return info.Mode().Perm() | 0o100, nil
 }
 
-// copyIntoPlace writes src to a temporary file next to targetPath and renames it
-// over the target, so the target is never observed half-written and an
-// interrupted restore leaves the old binary intact.
+// copyIntoPlace writes src to a temporary file next to targetPath, verifies it,
+// and hands it to the platform-specific replacement path. Unix atomically
+// renames it over the target. Windows uses a verified SCM recovery image when
+// the target is executing and cannot be replaced directly.
 //
 // The bytes are hashed on their way into the staging file and the result is
-// compared against recorded before the rename, so what lands at targetPath is
+// compared against recorded before publication, so what lands at targetPath is
 // what was verified — not merely what a descriptor held at the time of an
 // earlier pass. A mismatch removes the staging file and wraps
 // ErrRollbackUnverified, so the caller quarantines the source copy.
-func copyIntoPlace(src io.Reader, targetPath string, mode os.FileMode, srcPath, recorded string) error {
+func copyIntoPlace(src io.Reader, targetPath string, mode os.FileMode, srcPath, recorded, installDir, serviceName string) error {
 	tmpPath := targetPath + ".restore"
 	if err := os.Remove(tmpPath); err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return fmt.Errorf("clearing the stale restore staging file %s: %w", tmpPath, err)
@@ -382,8 +383,7 @@ func copyIntoPlace(src io.Reader, targetPath string, mode os.FileMode, srcPath, 
 		_ = os.Remove(tmpPath)
 		return fmt.Errorf("closing %s: %w", tmpPath, err)
 	}
-	if err := replaceRestoredBinary(tmpPath, targetPath); err != nil {
-		_ = os.Remove(tmpPath)
+	if err := replaceRestoredBinary(tmpPath, targetPath, installDir, serviceName, srcPath, mode, recorded); err != nil {
 		return fmt.Errorf("restoring %s: %w", targetPath, err)
 	}
 	return nil
