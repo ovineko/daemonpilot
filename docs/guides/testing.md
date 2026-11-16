@@ -373,8 +373,9 @@ sh scripts/crossarch.sh docker
 pnpm dm exec task -- test:crossarch
 ```
 
-The runner compiles every untagged package with tests using `go test -c`, plus
-three fixture executables, with `CGO_ENABLED=0`. It runs linux/amd64, arm64,
+The runner compiles every untagged package with tests using `go test -c`, and
+bundles the lifecycle, process, update, probe, exec-through v2/v3, watchdog
+worker-mode, and crash fixtures with `CGO_ENABLED=0`. It runs linux/amd64, arm64,
 riscv64, arm/v7, and 386 in architecture-specific Debian image digests pinned in
 the script, with Docker `--init` and an explicit `--platform`. Guests need neither
 Go nor a checkout. Each package runs
@@ -395,10 +396,12 @@ DAEMONPILOT_TEST_TIME_SCALE=8 sh daemonpilot-tests/run.sh riscv64
 ```
 
 Omit the architecture argument to detect the native architecture. Use `arm` for
-the arm/v7 bundle. `DAEMONPILOT_TEST_FIXTURES` supplies a directory containing the
-`lifecycle`, `process`, and `update` executables (`.exe` on Windows) when running
-individual test binaries. Each test copies its fixture into its own temporary
-directory. Ordinary `go test` builds fixtures there when no directory is supplied.
+the arm/v7 bundle.
+`DAEMONPILOT_TEST_FIXTURES` supplies the required fixtures, including `lifecycle`,
+`process`, `update`, `probe`, `execfixture-v2`, and `execfixture-v3` (`.exe` on
+Windows) when running individual test binaries. Each test copies its fixture into
+its own temporary directory. Ordinary `go test` builds fixtures there when no
+directory is supplied.
 The watchdog argument probe and process-group probe re-execute the test binary.
 No `ps` is required. The packed runner is Linux-only, not a BSD or Windows bundle.
 The scripts respect the caller's normal Go cache configuration.

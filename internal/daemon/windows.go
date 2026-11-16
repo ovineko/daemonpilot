@@ -333,8 +333,31 @@ func (m *windowsManager) ReadInstalledConfig() (string, error) {
 	return string(data), nil
 }
 
+func (m *windowsManager) updateSCMBinaryPath(binaryPath string) error {
+	return m.withService(func(service *mgr.Service) error {
+		return updateWindowsSCMBinaryPath(service, binaryPath)
+	})
+}
+
+type windowsServiceConfigUpdater interface {
+	Config() (mgr.Config, error)
+	UpdateConfig(mgr.Config) error
+}
+
+func updateWindowsSCMBinaryPath(service windowsServiceConfigUpdater, binaryPath string) error {
+	config, err := service.Config()
+	if err != nil {
+		return fmt.Errorf("reading current service configuration: %w", err)
+	}
+	config.BinaryPathName = binaryPath
+	if err := service.UpdateConfig(config); err != nil {
+		return fmt.Errorf("updating service configuration: %w", err)
+	}
+	return nil
+}
+
 // UpdateBinaryPath changes only the executable path, retaining the service
-// arguments and any forward-compatible manifest fields.
+// arguments and the SCM's existing startup and recovery settings.
 func (m *windowsManager) UpdateBinaryPath(imagePath string) error {
 	content, err := m.ReadInstalledConfig()
 	if err != nil {
@@ -352,13 +375,16 @@ func (m *windowsManager) UpdateBinaryPath(imagePath string) error {
 	if err != nil {
 		return err
 	}
+	if _, err := os.Stat(newDefinition.ImagePath); err != nil {
+		return fmt.Errorf("refusing to update service to an image that is not there (%s): %w", newDefinition.ImagePath, err)
+	}
 	manifestPath := m.GetManifestPath()
 	if err := writeWindowsManifestAtomically(manifestPath, updated); err != nil {
 		return fmt.Errorf("writing updated service definition: %w", err)
 	}
-	if err := m.applyDefinition(newDefinition); err != nil {
+	if err := m.updateSCMBinaryPath(newDefinition.BinaryPath); err != nil {
 		fileErr := writeWindowsManifestAtomically(manifestPath, content)
-		scmErr := m.applyDefinition(oldDefinition)
+		scmErr := m.updateSCMBinaryPath(oldDefinition.BinaryPath)
 		if fileErr != nil || scmErr != nil {
 			return errors.Join(
 				fmt.Errorf("updating service image path: %w", err),

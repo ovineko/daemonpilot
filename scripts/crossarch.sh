@@ -30,8 +30,11 @@ for arch in amd64 arm64 riscv64 arm 386; do
   go build -trimpath -o "$bundle/$arch/fixtures/process" ./test/integration/testdata/processfixture
   go build -trimpath -o "$bundle/$arch/fixtures/update" ./internal/watchdog/testdata/updatefixture
   go build -trimpath -o "$bundle/$arch/fixtures/probe" ./internal/updater/testdata/probe
-  for mode in run exit0 exit1 exit2 count-exit1 marker-exit1; do
-    go build -trimpath -ldflags "-X main.mode=$mode" -o "$bundle/$arch/fixtures/watchdog-worker-$mode" ./internal/watchdog/testdata/portable_worker.go
+  for version in v2 v3; do
+    go build -trimpath -ldflags "-X main.version=$version" -o "$bundle/$arch/fixtures/execfixture-$version" ./test/integration/testdata/execfixture
+  done
+  for fixture_mode in run exit0 exit1 exit2 count-exit1 marker-exit1; do
+    go build -trimpath -ldflags "-X main.mode=$fixture_mode" -o "$bundle/$arch/fixtures/watchdog-worker-$fixture_mode" ./internal/watchdog/testdata/portable_worker.go
   done
   for version in v1 v2 vreg; do
     go build -trimpath -ldflags "-X main.version=$version" -o "$bundle/$arch/fixtures/crashfixture-$version" ./internal/updater/testdata/crashfixture

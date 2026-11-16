@@ -11,7 +11,6 @@ import (
 	"io"
 	"log/slog"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
@@ -597,10 +596,19 @@ func TestIntegration_ExecThroughChainCollapse(t *testing.T) {
 
 func buildExecThroughFixture(t *testing.T, outputPath, version string) {
 	t.Helper()
-	flags := "-X main.version=" + version
-	cmd := exec.Command("go", "build", "-ldflags", flags, "-o", outputPath, "./testdata/execfixture")
-	if output, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("build %s exec-through fixture: %v\n%s", version, err, output)
+	fixturePath := testsupport.Fixture(
+		t,
+		"execfixture-"+version,
+		"./testdata/execfixture",
+		"-ldflags",
+		"-X main.version="+version,
+	)
+	binary, err := os.ReadFile(fixturePath)
+	if err != nil {
+		t.Fatalf("read %s exec-through fixture: %v", version, err)
+	}
+	if err := os.WriteFile(outputPath, binary, 0o700); err != nil {
+		t.Fatalf("install %s exec-through fixture: %v", version, err)
 	}
 }
 
