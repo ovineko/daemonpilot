@@ -13,23 +13,18 @@ import (
 	"github.com/ovineko/daemonpilot/internal/testsupport"
 )
 
-var fixtureBuildWait = testsupport.Scale(2 * time.Minute)
-
-// buildCrashFixture compiles the versioned fixture so the installed file can
-// be verified by ordinary execution: the printed version comes from the
-// binary's own bytes, not from a sidecar.
+// buildCrashFixture selects a versioned prebuilt fixture or builds it locally.
 func buildCrashFixture(t *testing.T, dir, version string) string {
 	t.Helper()
-	bin := filepath.Join(dir, "crashfixture-"+version)
-	if runtime.GOOS == "windows" {
-		bin += ".exe"
+	fixture := testsupport.Fixture(t, "crashfixture-"+version, "./testdata/crashfixture",
+		"-ldflags", "-X main.version="+version)
+	bin := filepath.Join(dir, filepath.Base(fixture))
+	data, err := os.ReadFile(fixture)
+	if err != nil {
+		t.Fatal(err)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), fixtureBuildWait)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, "go", "build", "-ldflags", "-X main.version="+version, "-o", bin, "./testdata/crashfixture")
-	cmd.Env = append(os.Environ(), "GOWORK=off", "CGO_ENABLED=0")
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("build fixture %s: %v\n%s", version, err, out)
+	if err := os.WriteFile(bin, data, 0o700); err != nil {
+		t.Fatal(err)
 	}
 	return bin
 }

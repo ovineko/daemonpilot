@@ -532,8 +532,9 @@ func TestRollbackDigestPinsTheServiceName(t *testing.T) {
 func TestRestoreRollbackBinary(t *testing.T) {
 	dir := t.TempDir()
 	const name = "testapp"
-	rollbackPath := filepath.Join(dir, name+".rollback")
-	targetPath := filepath.Join(dir, name)
+	binaryName := InstalledBinaryName(name)
+	rollbackPath := filepath.Join(dir, binaryName) + ".rollback"
+	targetPath := filepath.Join(dir, binaryName)
 
 	if err := os.WriteFile(targetPath, []byte("new binary"), 0o755); err != nil {
 		t.Fatal(err)
@@ -561,7 +562,7 @@ func TestRestoreRollbackBinary(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if info.Mode().Perm()&0o100 == 0 {
+	if runtime.GOOS != "windows" && info.Mode().Perm()&0o100 == 0 {
 		t.Errorf("restored binary is not executable (mode %s)", info.Mode())
 	}
 	if _, err := os.Lstat(rollbackPath); !os.IsNotExist(err) {
@@ -638,8 +639,9 @@ func TestRestoreRollbackBinaryRefusesUnverifiedCopies(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			dir := t.TempDir()
 			const name = "testapp"
-			rollbackPath := filepath.Join(dir, name+".rollback")
-			targetPath := filepath.Join(dir, name)
+			binaryName := InstalledBinaryName(name)
+			rollbackPath := filepath.Join(dir, binaryName) + ".rollback"
+			targetPath := filepath.Join(dir, binaryName)
 			if err := os.WriteFile(targetPath, []byte("new binary"), 0o755); err != nil {
 				t.Fatal(err)
 			}
@@ -769,8 +771,9 @@ func TestSaveStateRefusesPlantedPaths(t *testing.T) {
 func TestRollbackDigestReadFailureIsNotAnIntegrityFailure(t *testing.T) {
 	dir := t.TempDir()
 	const name = "testapp"
-	rollbackPath := filepath.Join(dir, name+".rollback")
-	targetPath := filepath.Join(dir, name)
+	binaryName := InstalledBinaryName(name)
+	rollbackPath := filepath.Join(dir, binaryName) + ".rollback"
+	targetPath := filepath.Join(dir, binaryName)
 	if err := os.WriteFile(targetPath, []byte("new binary"), 0o755); err != nil {
 		t.Fatal(err)
 	}

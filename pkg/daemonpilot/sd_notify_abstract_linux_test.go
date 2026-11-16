@@ -13,27 +13,14 @@ import (
 	"github.com/ovineko/daemonpilot/internal/testsupport"
 )
 
-// Linux abstract Unix sockets have no filesystem path; other Unix targets use
-// the filesystem-socket tests in sd_notify_test.go.
 func TestSdNotifyAbstractSocket(t *testing.T) {
+	runAbstractSocketCheck(t)
+}
+
+func runAbstractSocketCheck(t *testing.T) {
+	t.Helper()
 	addr := &net.UnixAddr{Name: "\x00daemonpilot-test-notify", Net: "unixgram"}
-	type listenResult struct {
-		conn *net.UnixConn
-		err  error
-	}
-	listening := make(chan listenResult, 1)
-	go func() {
-		conn, err := net.ListenUnixgram("unixgram", addr)
-		listening <- listenResult{conn: conn, err: err}
-	}()
-	var conn *net.UnixConn
-	var err error
-	select {
-	case result := <-listening:
-		conn, err = result.conn, result.err
-	case <-time.After(testsupport.Scale(2 * time.Second)):
-		t.Fatal("ListenUnixgram timed out for an abstract Unix socket")
-	}
+	conn, err := net.ListenUnixgram("unixgram", addr)
 	if errors.Is(err, os.ErrPermission) || errors.Is(err, syscall.ENOSYS) {
 		t.Skipf("host cannot provide Unix datagram sockets: %v", err)
 	}
@@ -43,36 +30,18 @@ func TestSdNotifyAbstractSocket(t *testing.T) {
 	defer func() { _ = conn.Close() }()
 
 	t.Setenv("NOTIFY_SOCKET", "@daemonpilot-test-notify")
-	ready := make(chan error, 1)
-	go func() { ready <- sdNotifyReady() }()
-	select {
-	case err := <-ready:
-		if err != nil {
-			t.Fatalf("sdNotify: %v", err)
-		}
-	case <-time.After(testsupport.Scale(2 * time.Second)):
-		t.Fatal("sdNotify timed out for an abstract Unix socket")
+	if err := sdNotifyReady(); err != nil {
+		t.Fatalf("sdNotify: %v", err)
 	}
-
-	type readResult struct {
-		message string
-		err     error
+	if err := conn.SetReadDeadline(time.Now().Add(testsupport.Scale(time.Second))); err != nil {
+		t.Fatal(err)
 	}
-	read := make(chan readResult, 1)
-	go func() {
-		buf := make([]byte, 128)
-		n, err := conn.Read(buf)
-		read <- readResult{message: string(buf[:n]), err: err}
-	}()
-	select {
-	case result := <-read:
-		if result.err != nil {
-			t.Fatalf("Read: %v", result.err)
-		}
-		if result.message != "READY=1" {
-			t.Errorf("got %q, want %q", result.message, "READY=1")
-		}
-	case <-time.After(testsupport.Scale(2 * time.Second)):
-		t.Fatal("timed out waiting for an abstract-socket readiness notification")
+	buf := make([]byte, 128)
+	n, err := conn.Read(buf)
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	if got := string(buf[:n]); got != "READY=1" {
+		t.Errorf("got %q, want %q", got, "READY=1")
 	}
 }

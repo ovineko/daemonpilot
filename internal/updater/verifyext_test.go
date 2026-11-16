@@ -90,8 +90,9 @@ func TestExtensionDefaultHashDefaultSignature(t *testing.T) {
 		if err != nil {
 			t.Fatalf("verify: %v", err)
 		}
-		if !strings.HasSuffix(path, ".new") {
-			t.Fatalf("staged path = %q", path)
+		wantSuffix := ".new" + executableExtension()
+		if !strings.HasSuffix(path, wantSuffix) {
+			t.Fatalf("staged path = %q, want suffix %q", path, wantSuffix)
 		}
 	})
 	t.Run("wrong context rejected", func(t *testing.T) {
@@ -595,7 +596,7 @@ func TestExtensionHTTPE2EVersionedRunAndReject(t *testing.T) {
 		if err != nil || selftest == nil || !selftest.OK {
 			t.Fatalf("selftest: %+v, %v", selftest, err)
 		}
-		installed := filepath.Join(u.installDir, u.binaryName)
+		installed := filepath.Join(u.installDir, daemonpilot.InstalledBinaryName("myapp"))
 		install(t, v1, installed)
 		if err := u.ApplyFastUpdate(context.Background(), staged); err != nil {
 			t.Fatalf("apply: %v", err)
@@ -609,7 +610,7 @@ func TestExtensionHTTPE2EVersionedRunAndReject(t *testing.T) {
 		manifest := fmt.Sprintf(`{"version":"2.0.0","watchdog_version":"1","size":%d,"digest":%q}`,
 			len(v2Bytes), hex.EncodeToString(digest[:]))
 		u := New(newCfg(manifest, hex.EncodeToString(wrongSignature)), newTestLogger(), t.TempDir(), "myapp")
-		installed := filepath.Join(u.installDir, u.binaryName)
+		installed := filepath.Join(u.installDir, daemonpilot.InstalledBinaryName("myapp"))
 		install(t, v1, installed)
 
 		info, err := u.config.Source.CheckUpdate(context.Background(), "1.0.0")
@@ -663,7 +664,7 @@ func TestExtensionHTTPE2ECustomHashRejectsSHA256AliasField(t *testing.T) {
 		NewHash:          func() hash.Hash { return sha512.New384() },
 	}
 	u := New(cfg, newTestLogger(), t.TempDir(), "myapp")
-	installed := filepath.Join(u.installDir, u.binaryName)
+	installed := filepath.Join(u.installDir, daemonpilot.InstalledBinaryName("myapp"))
 	v1Bytes, err := os.ReadFile(v1)
 	if err != nil {
 		t.Fatal(err)

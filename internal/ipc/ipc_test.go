@@ -317,8 +317,10 @@ func TestClientRequestAfterServerClose(t *testing.T) {
 	}
 
 	client := NewClient(pipeFiles.RequestW, pipeFiles.ResponseR)
+	defer client.Close()
 
 	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	go server.Serve(ctx)
 
 	got, err := client.Request()
@@ -330,14 +332,36 @@ func TestClientRequestAfterServerClose(t *testing.T) {
 	}
 
 	cancel()
-	<-server.Done()
-
-	_, err = client.Request()
-	if err == nil {
-		t.Error("expected error after server close")
+	closeDone := make(chan struct{})
+	go func() {
+		server.Close()
+		close(closeDone)
+	}()
+	select {
+	case <-closeDone:
+	case <-time.After(testsupport.Scale(2 * time.Second)):
+		t.Fatal("Server.Close blocked on the pending request read")
 	}
 
-	_ = client.Close()
+	requestDone := make(chan error, 1)
+	go func() {
+		_, err := client.Request()
+		requestDone <- err
+	}()
+	select {
+	case err := <-requestDone:
+		if err == nil {
+			t.Error("expected error after server close")
+		}
+	case <-time.After(testsupport.Scale(2 * time.Second)):
+		t.Fatal("post-close request did not return")
+	}
+
+	select {
+	case <-server.Done():
+	case <-time.After(testsupport.Scale(2 * time.Second)):
+		t.Fatal("Serve did not exit after the post-close request")
+	}
 }
 
 func TestNewClientFromEnvMissing(t *testing.T) {

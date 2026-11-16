@@ -197,9 +197,13 @@ func TestNativeServiceLifecycle(t *testing.T) {
 	if stagedWorker.PID == 0 || stagedWorker.Version != "3.0.0" {
 		t.Fatalf("staged worker identity was not observed: %+v", stagedWorker)
 	}
+	// Do not offer the intentionally unhealthy v3 again after rollback.
+	offered.Store(nil)
 	await(t, "staged update rollback", func() bool {
 		state := readWorkerIfPresent(workerPath)
-		return state.Version == "2.0.0" && state.PID != stagedWorker.PID
+		return state.Version == "2.0.0" && state.PID != stagedWorker.PID && workerProcessAlive(state.PID)
+	}, func() string {
+		return nativeServiceDiagnostics(name, mgr.GetManifestPath(), logDir)
 	})
 	if workerProcessAlive(stagedWorker.PID) {
 		t.Fatalf("unhealthy staged worker %d remained alive after rollback", stagedWorker.PID)
@@ -311,13 +315,11 @@ func readWorkerIfPresent(path string) workerState {
 
 func readWorker(t *testing.T, path string) workerState {
 	t.Helper()
-	state := readWorkerIfPresent(path)
-	if state.PID == 0 {
-		t.Fatalf("missing worker identity in %s", path)
-	}
-	if !workerProcessAlive(state.PID) {
-		t.Fatalf("worker process %d is not alive", state.PID)
-	}
+	var state workerState
+	await(t, "live worker identity in "+path, func() bool {
+		state = readWorkerIfPresent(path)
+		return state.PID > 0 && workerProcessAlive(state.PID)
+	})
 	return state
 }
 

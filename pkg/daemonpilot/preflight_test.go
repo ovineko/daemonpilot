@@ -164,12 +164,15 @@ func TestPreflightInstall(t *testing.T) {
 // directory is bound to it. Resolving that against the CLI's working directory
 // would refuse the install over a directory the install never writes to.
 func TestPreflightInstallIgnoresRelativeManifestPath(t *testing.T) {
-	writable := t.TempDir()
-	t.Chdir(readOnlyDir(t))
-
-	cfg := &Config{Name: "myapp", InstallDir: writable, Logger: NewDefaultLogger(LogLevelInfo)}
-	if err := preflightInstall(cfg, ".daemonpilot-crontab-myapp.entry"); err != nil {
-		t.Fatalf("preflightInstall() error: %v", err)
+	readOnly := readOnlyDir(t)
+	manifestPath := ".daemonpilot-crontab-myapp.entry"
+	cfg := &Config{Name: "myapp", InstallDir: readOnly, Logger: NewDefaultLogger(LogLevelInfo)}
+	err := preflightInstall(cfg, manifestPath)
+	if err == nil {
+		t.Fatal("preflightInstall() error = nil, want install-directory probe failure")
+	}
+	if !strings.Contains(err.Error(), "probed paths: install directory") || strings.Contains(err.Error(), "manifest directory") {
+		t.Errorf("relative manifest was not ignored in probed paths: %v", err)
 	}
 }
 
@@ -359,7 +362,9 @@ func stubCrossScopeStat(t *testing.T, present ...string) {
 
 func TestPreflightCrossScope(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	for _, key := range []string{"HOME", "USERPROFILE", "HOMEDRIVE", "HOMEPATH"} {
+		t.Setenv(key, home)
+	}
 
 	systemUnit := filepath.Join("/etc/systemd/system", "myapp.service")
 	userUnit := filepath.Join(home, ".config", "systemd", "user", "myapp.service")

@@ -13,10 +13,12 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/ovineko/daemonpilot/internal/testsupport"
 	"github.com/ovineko/daemonpilot/pkg/daemonpilot"
 )
 
@@ -62,8 +64,8 @@ func TestNew(t *testing.T) {
 	if u.installDir != "/opt/myapp" {
 		t.Errorf("installDir = %q, want /opt/myapp", u.installDir)
 	}
-	if u.binaryName != "myapp" {
-		t.Errorf("binaryName = %q, want myapp", u.binaryName)
+	if u.binaryName != daemonpilot.InstalledBinaryName("myapp") {
+		t.Errorf("binaryName = %q, want %q", u.binaryName, daemonpilot.InstalledBinaryName("myapp"))
 	}
 }
 
@@ -201,8 +203,7 @@ func TestDownloadAndVerify_Success(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-
-	expectedPath := filepath.Join(tmpDir, "myapp.new")
+	expectedPath := daemonpilot.StagedNewPath(filepath.Join(tmpDir, daemonpilot.InstalledBinaryName("myapp")))
 	if path != expectedPath {
 		t.Errorf("path = %q, want %q", path, expectedPath)
 	}
@@ -219,7 +220,11 @@ func TestDownloadAndVerify_Success(t *testing.T) {
 	if err != nil {
 		t.Fatalf("stat: %v", err)
 	}
-	if fi.Mode()&0o111 == 0 {
+	if runtime.GOOS == "windows" {
+		if filepath.Ext(path) != ".exe" {
+			t.Errorf("staged executable extension = %q, want .exe", filepath.Ext(path))
+		}
+	} else if fi.Mode().Perm()&0o111 == 0 {
 		t.Error("file is not executable")
 	}
 }
@@ -255,7 +260,7 @@ func TestDownloadAndVerify_SignatureContext(t *testing.T) {
 				if err == nil || !strings.Contains(err.Error(), "signature verification failed") {
 					t.Fatalf("expected signature failure, got %v", err)
 				}
-				if _, err := os.Stat(filepath.Join(dir, "myapp.new")); !os.IsNotExist(err) {
+				if _, err := os.Stat(daemonpilot.StagedNewPath(filepath.Join(dir, daemonpilot.InstalledBinaryName("myapp")))); !os.IsNotExist(err) {
 					t.Fatalf("failed verification left staging file: %v", err)
 				}
 				return
@@ -299,7 +304,7 @@ func TestDownloadAndVerify_SHA256Mismatch(t *testing.T) {
 		t.Errorf("error = %q, want digest mismatch", err)
 	}
 
-	newPath := filepath.Join(tmpDir, "myapp.new")
+	newPath := daemonpilot.StagedNewPath(filepath.Join(tmpDir, daemonpilot.InstalledBinaryName("myapp")))
 	if _, err := os.Stat(newPath); !os.IsNotExist(err) {
 		t.Error(".new file should have been deleted after SHA256 mismatch")
 	}
@@ -333,7 +338,7 @@ func TestDownloadAndVerify_InvalidSignature(t *testing.T) {
 		t.Errorf("error = %q, want signature verification failed", err)
 	}
 
-	newPath := filepath.Join(tmpDir, "myapp.new")
+	newPath := daemonpilot.StagedNewPath(filepath.Join(tmpDir, daemonpilot.InstalledBinaryName("myapp")))
 	if _, err := os.Stat(newPath); !os.IsNotExist(err) {
 		t.Error(".new file should have been deleted after signature failure")
 	}
@@ -367,257 +372,140 @@ func contains(s, substr string) bool {
 	return strings.Contains(s, substr)
 }
 
-func writeScript(t *testing.T, dir, name, content string) string {
+func buildProbe(t *testing.T) string {
 	t.Helper()
-	path := filepath.Join(dir, name)
-	if err := os.WriteFile(path, []byte(content), 0o755); err != nil {
-		t.Fatal(err)
+	return testsupport.Fixture(t, "probe", "./testdata/probe")
+}
+
+func executableExtension() string {
+	if runtime.GOOS == "windows" {
+		return ".exe"
 	}
-	return path
+	return ""
+}
+
+func setProbeMode(t *testing.T, mode string) {
+	t.Helper()
+	t.Setenv("DAEMONPILOT_TEST_PROBE", mode)
 }
 
 func TestRunSelftest_Success(t *testing.T) {
-	tmpDir := t.TempDir()
-	script := writeScript(t, tmpDir, "selftest-ok", `#!/bin/sh
-if [ "$1" = "selftest" ]; then
-  echo '{"success":true,"checks":{"db":{"ok":true,"message":"connected"}}}'
-fi
-`)
-
-	u := New(&daemonpilot.UpdateConfig{}, newTestLogger(), tmpDir, "myapp")
-
-	result, err := u.RunSelftest(context.Background(), script, 5*time.Second)
+	probe := buildProbe(t)
+	u := New(&daemonpilot.UpdateConfig{}, newTestLogger(), t.TempDir(), "myapp")
+	result, err := u.RunSelftest(context.Background(), probe, 5*time.Second)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !result.OK {
-		t.Error("expected selftest to pass")
-	}
-	if len(result.Checks) != 1 {
-		t.Errorf("checks count = %d, want 1", len(result.Checks))
-	}
-	check, ok := result.Checks["db"]
-	if !ok {
-		t.Fatal("missing 'db' check")
-	}
-	if !check.OK {
-		t.Error("expected db check to pass")
-	}
-	if check.Message != "connected" {
-		t.Errorf("check message = %q, want connected", check.Message)
+	if !result.OK || len(result.Checks) != 1 || result.Checks["db"].Message != "connected" {
+		t.Fatalf("unexpected selftest result: %+v", result)
 	}
 }
 
 func TestRunSelftest_Timeout(t *testing.T) {
-	tmpDir := t.TempDir()
-	script := writeScript(t, tmpDir, "selftest-slow", `#!/bin/sh
-if [ "$1" = "selftest" ]; then
-  sleep 30
-fi
-`)
-
-	u := New(&daemonpilot.UpdateConfig{}, newTestLogger(), tmpDir, "myapp")
-
-	_, err := u.RunSelftest(context.Background(), script, 100*time.Millisecond)
-	if err == nil {
-		t.Fatal("expected error for timeout")
-	}
-	if !contains(err.Error(), "timed out") {
-		t.Errorf("error = %q, want timeout error", err)
+	setProbeMode(t, "delay")
+	u := New(&daemonpilot.UpdateConfig{}, newTestLogger(), t.TempDir(), "myapp")
+	_, err := u.RunSelftest(context.Background(), buildProbe(t), 100*time.Millisecond)
+	if err == nil || !contains(err.Error(), "timed out") {
+		t.Fatalf("error = %v, want timeout error", err)
 	}
 }
 
 func TestRunSelftest_InvalidJSON(t *testing.T) {
-	tmpDir := t.TempDir()
-	script := writeScript(t, tmpDir, "selftest-badjson", `#!/bin/sh
-if [ "$1" = "selftest" ]; then
-  echo 'not json at all'
-fi
-`)
-
-	u := New(&daemonpilot.UpdateConfig{}, newTestLogger(), tmpDir, "myapp")
-
-	_, err := u.RunSelftest(context.Background(), script, 5*time.Second)
-	if err == nil {
-		t.Fatal("expected error for invalid JSON")
-	}
-	if !contains(err.Error(), "parse selftest output") {
-		t.Errorf("error = %q, want parse error", err)
+	setProbeMode(t, "invalid-json")
+	u := New(&daemonpilot.UpdateConfig{}, newTestLogger(), t.TempDir(), "myapp")
+	_, err := u.RunSelftest(context.Background(), buildProbe(t), 5*time.Second)
+	if err == nil || !contains(err.Error(), "parse selftest output") {
+		t.Fatalf("error = %v, want parse error", err)
 	}
 }
 
 func TestRunSelftest_FailureResult(t *testing.T) {
-	tmpDir := t.TempDir()
-	script := writeScript(t, tmpDir, "selftest-fail", `#!/bin/sh
-if [ "$1" = "selftest" ]; then
-  echo '{"success":false,"checks":{"api":{"ok":false,"message":"unreachable"}}}'
-fi
-`)
-
-	u := New(&daemonpilot.UpdateConfig{}, newTestLogger(), tmpDir, "myapp")
-
-	result, err := u.RunSelftest(context.Background(), script, 5*time.Second)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if result.OK {
-		t.Error("expected selftest to fail")
-	}
-	check, ok := result.Checks["api"]
-	if !ok {
-		t.Fatal("missing 'api' check")
-	}
-	if check.OK {
-		t.Error("expected api check to fail")
-	}
-	if check.Message != "unreachable" {
-		t.Errorf("check message = %q, want unreachable", check.Message)
+	setProbeMode(t, "failure-result")
+	u := New(&daemonpilot.UpdateConfig{}, newTestLogger(), t.TempDir(), "myapp")
+	result, err := u.RunSelftest(context.Background(), buildProbe(t), 5*time.Second)
+	if err != nil || result.OK || result.Checks["api"].Message != "unreachable" {
+		t.Fatalf("result = %+v, error = %v", result, err)
 	}
 }
 
 func TestRunSelftest_ProcessError(t *testing.T) {
-	tmpDir := t.TempDir()
-	script := writeScript(t, tmpDir, "selftest-exit1", `#!/bin/sh
-exit 1
-`)
-
-	u := New(&daemonpilot.UpdateConfig{}, newTestLogger(), tmpDir, "myapp")
-
-	_, err := u.RunSelftest(context.Background(), script, 5*time.Second)
-	if err == nil {
-		t.Fatal("expected error for non-zero exit")
-	}
-	if !contains(err.Error(), "selftest process exited with error") {
-		t.Errorf("error = %q, want exit error", err)
+	setProbeMode(t, "nonzero")
+	u := New(&daemonpilot.UpdateConfig{}, newTestLogger(), t.TempDir(), "myapp")
+	_, err := u.RunSelftest(context.Background(), buildProbe(t), 5*time.Second)
+	if err == nil || !contains(err.Error(), "selftest process exited with error") {
+		t.Fatalf("error = %v, want exit error", err)
 	}
 }
 
 func TestGetBinaryWatchdogVersion_Success(t *testing.T) {
-	tmpDir := t.TempDir()
-	script := writeScript(t, tmpDir, "wdv-ok", `#!/bin/sh
-if [ "$1" = "watchdog-version" ]; then
-  echo "2"
-fi
-`)
-
-	u := New(&daemonpilot.UpdateConfig{}, newTestLogger(), tmpDir, "myapp")
-
-	version, err := u.GetBinaryWatchdogVersion(context.Background(), script)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if version != "2" {
-		t.Errorf("version = %q, want %q", version, "2")
+	u := New(&daemonpilot.UpdateConfig{}, newTestLogger(), t.TempDir(), "myapp")
+	version, err := u.GetBinaryWatchdogVersion(context.Background(), buildProbe(t))
+	if err != nil || version != "2" {
+		t.Fatalf("version = %q, error = %v", version, err)
 	}
 }
 
 func TestGetBinaryWatchdogVersion_TrimWhitespace(t *testing.T) {
-	tmpDir := t.TempDir()
-	script := writeScript(t, tmpDir, "wdv-ws", `#!/bin/sh
-if [ "$1" = "watchdog-version" ]; then
-  echo "  3  "
-fi
-`)
-
-	u := New(&daemonpilot.UpdateConfig{}, newTestLogger(), tmpDir, "myapp")
-
-	version, err := u.GetBinaryWatchdogVersion(context.Background(), script)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if version != "3" {
-		t.Errorf("version = %q, want %q", version, "3")
+	setProbeMode(t, "whitespace")
+	u := New(&daemonpilot.UpdateConfig{}, newTestLogger(), t.TempDir(), "myapp")
+	version, err := u.GetBinaryWatchdogVersion(context.Background(), buildProbe(t))
+	if err != nil || version != "3" {
+		t.Fatalf("version = %q, error = %v", version, err)
 	}
 }
 
 func TestGetBinaryWatchdogVersion_Timeout(t *testing.T) {
-	tmpDir := t.TempDir()
-	script := writeScript(t, tmpDir, "wdv-slow", `#!/bin/sh
-if [ "$1" = "watchdog-version" ]; then
-  sleep 30
-fi
-`)
-
-	u := New(&daemonpilot.UpdateConfig{}, newTestLogger(), tmpDir, "myapp")
-
-	_, err := u.GetBinaryWatchdogVersion(context.Background(), script)
-	if err == nil {
-		t.Fatal("expected error for timeout")
-	}
-	if !contains(err.Error(), "timed out") {
-		t.Errorf("error = %q, want timeout error", err)
+	setProbeMode(t, "delay")
+	u := New(&daemonpilot.UpdateConfig{}, newTestLogger(), t.TempDir(), "myapp")
+	_, err := u.GetBinaryWatchdogVersion(context.Background(), buildProbe(t))
+	if err == nil || !contains(err.Error(), "timed out") {
+		t.Fatalf("error = %v, want timeout error", err)
 	}
 }
 
 func TestGetBinaryWatchdogVersion_EmptyOutput(t *testing.T) {
-	tmpDir := t.TempDir()
-	script := writeScript(t, tmpDir, "wdv-empty", `#!/bin/sh
-if [ "$1" = "watchdog-version" ]; then
-  echo ""
-fi
-`)
-
-	u := New(&daemonpilot.UpdateConfig{}, newTestLogger(), tmpDir, "myapp")
-
-	_, err := u.GetBinaryWatchdogVersion(context.Background(), script)
-	if err == nil {
-		t.Fatal("expected error for empty output")
-	}
-	if !contains(err.Error(), "empty output") {
-		t.Errorf("error = %q, want empty output error", err)
+	setProbeMode(t, "empty")
+	u := New(&daemonpilot.UpdateConfig{}, newTestLogger(), t.TempDir(), "myapp")
+	_, err := u.GetBinaryWatchdogVersion(context.Background(), buildProbe(t))
+	if err == nil || !contains(err.Error(), "empty output") {
+		t.Fatalf("error = %v, want empty output error", err)
 	}
 }
 
 func TestGetBinaryWatchdogVersion_ProcessError(t *testing.T) {
-	tmpDir := t.TempDir()
-	script := writeScript(t, tmpDir, "wdv-exit1", `#!/bin/sh
-exit 1
-`)
-
-	u := New(&daemonpilot.UpdateConfig{}, newTestLogger(), tmpDir, "myapp")
-
-	_, err := u.GetBinaryWatchdogVersion(context.Background(), script)
-	if err == nil {
-		t.Fatal("expected error for non-zero exit")
-	}
-	if !contains(err.Error(), "watchdog-version process exited with error") {
-		t.Errorf("error = %q, want exit error", err)
+	setProbeMode(t, "nonzero")
+	u := New(&daemonpilot.UpdateConfig{}, newTestLogger(), t.TempDir(), "myapp")
+	_, err := u.GetBinaryWatchdogVersion(context.Background(), buildProbe(t))
+	if err == nil || !contains(err.Error(), "watchdog-version process exited with error") {
+		t.Fatalf("error = %v, want exit error", err)
 	}
 }
 
 func TestGetBinaryWatchdogVersion_BinaryNotFound(t *testing.T) {
 	u := New(&daemonpilot.UpdateConfig{}, newTestLogger(), "/tmp", "myapp")
-
 	_, err := u.GetBinaryWatchdogVersion(context.Background(), "/nonexistent/binary")
-	if err == nil {
-		t.Fatal("expected error for missing binary")
-	}
-	if !contains(err.Error(), "start watchdog-version process") {
-		t.Errorf("error = %q, want start error", err)
+	if err == nil || !contains(err.Error(), "start watchdog-version process") {
+		t.Fatalf("error = %v, want start error", err)
 	}
 }
 
 func TestRunSelftest_BinaryNotFound(t *testing.T) {
 	u := New(&daemonpilot.UpdateConfig{}, newTestLogger(), "/tmp", "myapp")
-
 	_, err := u.RunSelftest(context.Background(), "/nonexistent/binary", 5*time.Second)
-	if err == nil {
-		t.Fatal("expected error for missing binary")
-	}
-	if !contains(err.Error(), "start selftest process") {
-		t.Errorf("error = %q, want start error", err)
+	if err == nil || !contains(err.Error(), "start selftest process") {
+		t.Fatalf("error = %v, want start error", err)
 	}
 }
 
 func TestApplyFastUpdate_Success(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	currentPath := filepath.Join(tmpDir, "myapp")
+	currentPath := filepath.Join(tmpDir, daemonpilot.InstalledBinaryName("myapp"))
 	if err := os.WriteFile(currentPath, []byte("old-binary"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 
-	newPath := filepath.Join(tmpDir, "myapp.new")
+	newPath := daemonpilot.StagedNewPath(currentPath)
 	if err := os.WriteFile(newPath, []byte("new-binary"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -654,12 +542,12 @@ func TestApplyFastUpdate_Success(t *testing.T) {
 func TestApplyFastUpdate_NilWorkerCmd(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	currentPath := filepath.Join(tmpDir, "myapp")
+	currentPath := filepath.Join(tmpDir, daemonpilot.InstalledBinaryName("myapp"))
 	if err := os.WriteFile(currentPath, []byte("old-binary"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 
-	newPath := filepath.Join(tmpDir, "myapp.new")
+	newPath := daemonpilot.StagedNewPath(currentPath)
 	if err := os.WriteFile(newPath, []byte("new-binary"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -682,13 +570,13 @@ func TestApplyFastUpdate_NilWorkerCmd(t *testing.T) {
 
 func TestApplyFastUpdate_RenameFailure(t *testing.T) {
 	tmpDir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(tmpDir, "myapp"), []byte("old-binary"), 0o755); err != nil {
+	if err := os.WriteFile(filepath.Join(tmpDir, daemonpilot.InstalledBinaryName("myapp")), []byte("old-binary"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 
 	u := New(&daemonpilot.UpdateConfig{}, newTestLogger(), tmpDir, "myapp")
 
-	err := u.ApplyFastUpdate(context.Background(), "/nonexistent/path/myapp.new")
+	err := u.ApplyFastUpdate(context.Background(), daemonpilot.StagedNewPath(filepath.Join("/nonexistent/path", daemonpilot.InstalledBinaryName("myapp"))))
 	if err == nil {
 		t.Fatal("expected error for rename failure")
 	}
@@ -720,12 +608,12 @@ func TestCleanupStaleFilesRemovesLegacyWindowsRollbackNames(t *testing.T) {
 func TestApplyStagedUpdate_Approved(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	currentPath := filepath.Join(tmpDir, "myapp")
+	currentPath := filepath.Join(tmpDir, daemonpilot.InstalledBinaryName("myapp"))
 	if err := os.WriteFile(currentPath, []byte("old-binary"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 
-	newPath := filepath.Join(tmpDir, "myapp.new")
+	newPath := daemonpilot.StagedNewPath(currentPath)
 	if err := os.WriteFile(newPath, []byte("new-binary"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -766,7 +654,7 @@ func TestApplyStagedUpdate_Approved(t *testing.T) {
 		t.Errorf("current binary content = %q, want %q", string(data), "new-binary")
 	}
 
-	rollbackPath := filepath.Join(tmpDir, "myapp.rollback")
+	rollbackPath := currentPath + ".rollback"
 	data, err = os.ReadFile(rollbackPath)
 	if err != nil {
 		t.Fatalf("read rollback binary: %v", err)
@@ -791,12 +679,12 @@ func TestApplyStagedUpdate_Approved(t *testing.T) {
 func TestApplyStagedUpdate_Rejected(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	currentPath := filepath.Join(tmpDir, "myapp")
+	currentPath := filepath.Join(tmpDir, daemonpilot.InstalledBinaryName("myapp"))
 	if err := os.WriteFile(currentPath, []byte("old-binary"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 
-	newPath := filepath.Join(tmpDir, "myapp.new")
+	newPath := daemonpilot.StagedNewPath(currentPath)
 	if err := os.WriteFile(newPath, []byte("new-binary"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -836,12 +724,12 @@ func TestApplyStagedUpdate_Rejected(t *testing.T) {
 func TestApplyStagedUpdate_NoStagedUpdateFunc(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	currentPath := filepath.Join(tmpDir, "myapp")
+	currentPath := filepath.Join(tmpDir, daemonpilot.InstalledBinaryName("myapp"))
 	if err := os.WriteFile(currentPath, []byte("old-binary"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 
-	newPath := filepath.Join(tmpDir, "myapp.new")
+	newPath := daemonpilot.StagedNewPath(currentPath)
 	if err := os.WriteFile(newPath, []byte("new-binary"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -868,12 +756,12 @@ func TestApplyStagedUpdate_NoStagedUpdateFunc(t *testing.T) {
 func TestApplyStagedUpdate_CallbackError(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	currentPath := filepath.Join(tmpDir, "myapp")
+	currentPath := filepath.Join(tmpDir, daemonpilot.InstalledBinaryName("myapp"))
 	if err := os.WriteFile(currentPath, []byte("old-binary"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 
-	newPath := filepath.Join(tmpDir, "myapp.new")
+	newPath := daemonpilot.StagedNewPath(currentPath)
 	if err := os.WriteFile(newPath, []byte("new-binary"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -908,12 +796,12 @@ func TestApplyStagedUpdate_CallbackError(t *testing.T) {
 func TestApplyStagedUpdate_RollbackCreation(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	currentPath := filepath.Join(tmpDir, "myapp")
+	currentPath := filepath.Join(tmpDir, daemonpilot.InstalledBinaryName("myapp"))
 	if err := os.WriteFile(currentPath, []byte("current-v1"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 
-	newPath := filepath.Join(tmpDir, "myapp.new")
+	newPath := daemonpilot.StagedNewPath(currentPath)
 	if err := os.WriteFile(newPath, []byte("updated-v2"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -934,7 +822,7 @@ func TestApplyStagedUpdate_RollbackCreation(t *testing.T) {
 		t.Fatalf("err = %v, want ErrWatchdogRestart", err)
 	}
 
-	rollbackPath := filepath.Join(tmpDir, "myapp.rollback")
+	rollbackPath := currentPath + ".rollback"
 	data, err := os.ReadFile(rollbackPath)
 	if err != nil {
 		t.Fatalf("rollback file should exist: %v", err)
@@ -955,18 +843,18 @@ func TestApplyStagedUpdate_RollbackCreation(t *testing.T) {
 func TestApplyStagedUpdate_WithRunningWorker(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	currentPath := filepath.Join(tmpDir, "myapp")
+	currentPath := filepath.Join(tmpDir, daemonpilot.InstalledBinaryName("myapp"))
 	if err := os.WriteFile(currentPath, []byte("old-binary"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 
-	newPath := filepath.Join(tmpDir, "myapp.new")
+	newPath := daemonpilot.StagedNewPath(currentPath)
 	if err := os.WriteFile(newPath, []byte("new-binary"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 
-	script := writeScript(t, tmpDir, "worker", "#!/bin/sh\nsleep 30\n")
-	cmd := exec.Command(script)
+	probe := buildProbe(t)
+	cmd := exec.Command(probe, "worker")
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
@@ -1012,7 +900,7 @@ func recordTestRollbackDigest(t *testing.T, installDir, binaryName, rollbackPath
 func TestCheckRollbackFile_Exists(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	binaryPath := filepath.Join(tmpDir, "myapp")
+	binaryPath := filepath.Join(tmpDir, daemonpilot.InstalledBinaryName("myapp"))
 	rollbackPath := binaryPath + ".rollback"
 	if err := os.WriteFile(rollbackPath, []byte("old-binary"), 0o755); err != nil {
 		t.Fatal(err)
@@ -1037,7 +925,7 @@ func TestCheckRollbackFile_Exists(t *testing.T) {
 func TestCheckRollbackFile_NotExists(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	binaryPath := filepath.Join(tmpDir, "myapp")
+	binaryPath := filepath.Join(tmpDir, daemonpilot.InstalledBinaryName("myapp"))
 
 	u := New(&daemonpilot.UpdateConfig{}, newTestLogger(), tmpDir, "myapp")
 
@@ -1053,7 +941,7 @@ func TestCheckRollbackFile_NotExists(t *testing.T) {
 func TestHandleRollback_NoConfirmFunc_DeletesRollback(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	rollbackPath := filepath.Join(tmpDir, "myapp.rollback")
+	rollbackPath := filepath.Join(tmpDir, daemonpilot.InstalledBinaryName("myapp")) + ".rollback"
 	if err := os.WriteFile(rollbackPath, []byte("old-binary"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -1078,7 +966,7 @@ func TestHandleRollback_NoConfirmFunc_DeletesRollback(t *testing.T) {
 func TestHandleRollback_ConfirmationSuccess(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	rollbackPath := filepath.Join(tmpDir, "myapp.rollback")
+	rollbackPath := filepath.Join(tmpDir, daemonpilot.InstalledBinaryName("myapp")) + ".rollback"
 	if err := os.WriteFile(rollbackPath, []byte("old-binary"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -1107,12 +995,12 @@ func TestHandleRollback_ConfirmationSuccess(t *testing.T) {
 func TestHandleRollback_ConfirmationDenied_RestoresOldBinary(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	currentPath := filepath.Join(tmpDir, "myapp")
+	currentPath := filepath.Join(tmpDir, daemonpilot.InstalledBinaryName("myapp"))
 	if err := os.WriteFile(currentPath, []byte("new-binary"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 
-	rollbackPath := filepath.Join(tmpDir, "myapp.rollback")
+	rollbackPath := currentPath + ".rollback"
 	if err := os.WriteFile(rollbackPath, []byte("old-binary"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -1146,12 +1034,12 @@ func TestHandleRollback_ConfirmationDenied_RestoresOldBinary(t *testing.T) {
 func TestHandleRollback_Timeout_RestoresOldBinary(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	currentPath := filepath.Join(tmpDir, "myapp")
+	currentPath := filepath.Join(tmpDir, daemonpilot.InstalledBinaryName("myapp"))
 	if err := os.WriteFile(currentPath, []byte("new-binary"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 
-	rollbackPath := filepath.Join(tmpDir, "myapp.rollback")
+	rollbackPath := currentPath + ".rollback"
 	if err := os.WriteFile(rollbackPath, []byte("old-binary"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -1182,12 +1070,12 @@ func TestHandleRollback_Timeout_RestoresOldBinary(t *testing.T) {
 func TestHandleRollback_CallbackError_RestoresOldBinary(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	currentPath := filepath.Join(tmpDir, "myapp")
+	currentPath := filepath.Join(tmpDir, daemonpilot.InstalledBinaryName("myapp"))
 	if err := os.WriteFile(currentPath, []byte("new-binary"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 
-	rollbackPath := filepath.Join(tmpDir, "myapp.rollback")
+	rollbackPath := currentPath + ".rollback"
 	if err := os.WriteFile(rollbackPath, []byte("old-binary"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -1217,7 +1105,7 @@ func TestHandleRollback_CallbackError_RestoresOldBinary(t *testing.T) {
 func TestHandleRollback_NoConfirmFunc_RollbackFileNotExist(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	rollbackPath := filepath.Join(tmpDir, "myapp.rollback")
+	rollbackPath := filepath.Join(tmpDir, daemonpilot.InstalledBinaryName("myapp")) + ".rollback"
 
 	config := &daemonpilot.UpdateConfig{}
 	u := New(config, newTestLogger(), tmpDir, "myapp")
@@ -1231,7 +1119,7 @@ func TestHandleRollback_NoConfirmFunc_RollbackFileNotExist(t *testing.T) {
 func TestApplyStagedUpdate_RenameToCurrentFails(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	currentPath := filepath.Join(tmpDir, "myapp")
+	currentPath := filepath.Join(tmpDir, daemonpilot.InstalledBinaryName("myapp"))
 	if err := os.WriteFile(currentPath, []byte("old-binary"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -1247,8 +1135,8 @@ func TestApplyStagedUpdate_RenameToCurrentFails(t *testing.T) {
 	info := &daemonpilot.UpdateInfo{Version: "2.0.0", WatchdogVersion: "2"}
 	selftestResult := &daemonpilot.SelftestResult{OK: true}
 
-	// Use a nonexistent new binary path so rename from .new to current fails
-	err := u.ApplyStagedUpdate(context.Background(), filepath.Join(tmpDir, "nonexistent.new"), info, selftestResult)
+	// Use a nonexistent staged binary path so rename to current fails.
+	err := u.ApplyStagedUpdate(context.Background(), daemonpilot.StagedNewPath(filepath.Join(tmpDir, daemonpilot.InstalledBinaryName("myapp"))), info, selftestResult)
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -1273,11 +1161,11 @@ func TestApplyStagedUpdate_RenameToCurrentFails(t *testing.T) {
 func TestApplyStagedUpdate_DigestFailureKeepsCurrentExecutable(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	currentPath := filepath.Join(tmpDir, "myapp")
+	currentPath := filepath.Join(tmpDir, daemonpilot.InstalledBinaryName("myapp"))
 	if err := os.WriteFile(currentPath, []byte("old-binary"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	newPath := filepath.Join(tmpDir, "myapp.new")
+	newPath := daemonpilot.StagedNewPath(currentPath)
 	if err := os.WriteFile(newPath, []byte("new-binary"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -1317,7 +1205,7 @@ func TestApplyStagedUpdate_DigestFailureKeepsCurrentExecutable(t *testing.T) {
 func TestCreateRollbackBackup_PreservesContent(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	currentPath := filepath.Join(tmpDir, "myapp")
+	currentPath := filepath.Join(tmpDir, daemonpilot.InstalledBinaryName("myapp"))
 	if err := os.WriteFile(currentPath, []byte("old-binary"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -1339,7 +1227,7 @@ func TestCreateRollbackBackup_PreservesContent(t *testing.T) {
 func TestCreateRollbackBackup_ReplacesExistingRollback(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	currentPath := filepath.Join(tmpDir, "myapp")
+	currentPath := filepath.Join(tmpDir, daemonpilot.InstalledBinaryName("myapp"))
 	if err := os.WriteFile(currentPath, []byte("old-binary"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -1362,7 +1250,7 @@ func TestCreateRollbackBackup_ReplacesExistingRollback(t *testing.T) {
 func TestCleanupStaleFiles_RemovesNewFile(t *testing.T) {
 	tmpDir := t.TempDir()
 	binaryName := "myapp"
-	newPath := filepath.Join(tmpDir, binaryName+".new")
+	newPath := daemonpilot.StagedNewPath(filepath.Join(tmpDir, daemonpilot.InstalledBinaryName(binaryName)))
 
 	if err := os.WriteFile(newPath, []byte("stale-binary"), 0o755); err != nil {
 		t.Fatalf("create stale file: %v", err)
@@ -1391,7 +1279,7 @@ func TestCleanupStaleFiles_NoStaleFiles(t *testing.T) {
 func TestCleanupStaleFiles_LogsCleanup(t *testing.T) {
 	tmpDir := t.TempDir()
 	binaryName := "myapp"
-	newPath := filepath.Join(tmpDir, binaryName+".new")
+	newPath := daemonpilot.StagedNewPath(filepath.Join(tmpDir, daemonpilot.InstalledBinaryName(binaryName)))
 
 	if err := os.WriteFile(newPath, []byte("stale"), 0o755); err != nil {
 		t.Fatalf("create stale file: %v", err)
@@ -1478,7 +1366,7 @@ func TestDownloadAndVerify_CustomVerifyFuncRejects(t *testing.T) {
 		t.Fatal("expected verification error")
 	}
 
-	if _, err := os.Stat(filepath.Join(tmpDir, "myapp.new")); !os.IsNotExist(err) {
+	if _, err := os.Stat(daemonpilot.StagedNewPath(filepath.Join(tmpDir, daemonpilot.InstalledBinaryName("myapp")))); !os.IsNotExist(err) {
 		t.Error("staged .new file should be removed after failed verification")
 	}
 }
@@ -1582,7 +1470,7 @@ func TestHandleRollback_Integrity(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			tmpDir := t.TempDir()
-			currentPath := filepath.Join(tmpDir, "myapp")
+			currentPath := filepath.Join(tmpDir, daemonpilot.InstalledBinaryName("myapp"))
 			rollbackPath := currentPath + ".rollback"
 			if err := os.WriteFile(currentPath, []byte("new-binary"), 0o755); err != nil {
 				t.Fatal(err)
@@ -1638,7 +1526,7 @@ func TestHandleRollback_Integrity(t *testing.T) {
 // error and starts normally rather than acting on it.
 func TestCheckRollbackFile_UnverifiedReportsAbsent(t *testing.T) {
 	tmpDir := t.TempDir()
-	binaryPath := filepath.Join(tmpDir, "myapp")
+	binaryPath := filepath.Join(tmpDir, daemonpilot.InstalledBinaryName("myapp"))
 	if err := os.WriteFile(binaryPath+".rollback", []byte("planted"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -1672,7 +1560,7 @@ func TestCheckRollbackFile_UnverifiedReportsAbsent(t *testing.T) {
 // inherit the digest of the one that was moved aside.
 func TestCheckRollbackFile_QuarantineClearsDigest(t *testing.T) {
 	tmpDir := t.TempDir()
-	binaryPath := filepath.Join(tmpDir, "myapp")
+	binaryPath := filepath.Join(tmpDir, daemonpilot.InstalledBinaryName("myapp"))
 	rollbackPath := binaryPath + ".rollback"
 	if err := os.WriteFile(rollbackPath, []byte("recorded"), 0o755); err != nil {
 		t.Fatal(err)
@@ -1703,8 +1591,8 @@ func TestCheckRollbackFile_QuarantineClearsDigest(t *testing.T) {
 // path itself records the digest, so a rollback it created is accepted.
 func TestApplyStagedUpdate_RecordsRollbackDigest(t *testing.T) {
 	tmpDir := t.TempDir()
-	currentPath := filepath.Join(tmpDir, "myapp")
-	newPath := currentPath + ".new"
+	currentPath := filepath.Join(tmpDir, daemonpilot.InstalledBinaryName("myapp"))
+	newPath := daemonpilot.StagedNewPath(currentPath)
 	if err := os.WriteFile(currentPath, []byte("old-binary"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -1789,7 +1677,7 @@ func TestWindowsRollbackPathsShareCanonicalBinaryName(t *testing.T) {
 	}, newTestLogger(), dir, "agent", "windows")
 	currentPath := filepath.Join(dir, daemonpilot.InstalledBinaryNameFor("agent", "windows"))
 	rollbackPath := currentPath + ".rollback"
-	newPath := filepath.Join(dir, "agent.new.exe")
+	newPath := daemonpilot.StagedNewPath(currentPath)
 	if err := os.WriteFile(currentPath, []byte("old"), 0o750); err != nil {
 		t.Fatal(err)
 	}
@@ -1860,7 +1748,7 @@ func TestDownloadAndVerify_SymlinkAtStagingPathNotFollowed(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	newPath := filepath.Join(tmpDir, "myapp.new")
+	newPath := daemonpilot.StagedNewPath(filepath.Join(tmpDir, daemonpilot.InstalledBinaryName("myapp")))
 	if err := os.Symlink(victimPath, newPath); err != nil {
 		t.Skipf("symlinks unsupported on this platform: %v", err)
 	}
@@ -1903,7 +1791,7 @@ func TestDownloadAndVerify_StaleStagingFileReplaced(t *testing.T) {
 	content, hash, pubKey, sig := makeSignedBinary(t)
 
 	tmpDir := t.TempDir()
-	newPath := filepath.Join(tmpDir, "myapp.new")
+	newPath := daemonpilot.StagedNewPath(filepath.Join(tmpDir, daemonpilot.InstalledBinaryName("myapp")))
 	if err := os.WriteFile(newPath, []byte("stale-leftover-from-an-interrupted-update"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -1933,7 +1821,7 @@ func TestDownloadAndVerify_CreatesMissingInstallDir(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if path != filepath.Join(installDir, "myapp.new") {
+	if path != daemonpilot.StagedNewPath(filepath.Join(installDir, daemonpilot.InstalledBinaryName("myapp"))) {
 		t.Errorf("path = %q, want it inside %q", path, installDir)
 	}
 	if _, err := os.Stat(path); err != nil {
@@ -1976,7 +1864,7 @@ func TestDownloadAndVerify_SyncFailureRemovesStagedBinary(t *testing.T) {
 	if !contains(err.Error(), "sync staged binary") {
 		t.Errorf("error = %q, want it to mention the failed sync", err)
 	}
-	if _, err := os.Stat(filepath.Join(tmpDir, "myapp.new")); !os.IsNotExist(err) {
+	if _, err := os.Stat(daemonpilot.StagedNewPath(filepath.Join(tmpDir, daemonpilot.InstalledBinaryName("myapp")))); !os.IsNotExist(err) {
 		t.Error("staged file should be removed after a failed sync")
 	}
 }
@@ -1984,8 +1872,8 @@ func TestDownloadAndVerify_SyncFailureRemovesStagedBinary(t *testing.T) {
 func TestApplyFastUpdate_SyncsInstallDirAfterRename(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	currentPath := filepath.Join(tmpDir, "myapp")
-	newPath := filepath.Join(tmpDir, "myapp.new")
+	currentPath := filepath.Join(tmpDir, daemonpilot.InstalledBinaryName("myapp"))
+	newPath := daemonpilot.StagedNewPath(currentPath)
 	if err := os.WriteFile(currentPath, []byte("old-binary"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -2018,8 +1906,8 @@ func TestApplyFastUpdate_SyncsInstallDirAfterRename(t *testing.T) {
 func TestApplyFastUpdate_DirSyncFailureIsNotFatal(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	currentPath := filepath.Join(tmpDir, "myapp")
-	newPath := filepath.Join(tmpDir, "myapp.new")
+	currentPath := filepath.Join(tmpDir, daemonpilot.InstalledBinaryName("myapp"))
+	newPath := daemonpilot.StagedNewPath(currentPath)
 	if err := os.WriteFile(currentPath, []byte("old-binary"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -2043,7 +1931,7 @@ func TestApplyFastUpdate_DirSyncFailureIsNotFatal(t *testing.T) {
 
 func TestCleanupStaleFiles_RemovesDanglingSymlink(t *testing.T) {
 	tmpDir := t.TempDir()
-	newPath := filepath.Join(tmpDir, "myapp.new")
+	newPath := daemonpilot.StagedNewPath(filepath.Join(tmpDir, daemonpilot.InstalledBinaryName("myapp")))
 	if err := os.Symlink(filepath.Join(tmpDir, "does-not-exist"), newPath); err != nil {
 		t.Skipf("symlinks unsupported on this platform: %v", err)
 	}
@@ -2065,7 +1953,7 @@ func TestCleanupStaleFiles_RemovesDanglingSymlink(t *testing.T) {
 // retryable.
 func TestCheckRollbackFile_UnreadableDigestLeavesTheCopyAlone(t *testing.T) {
 	tmpDir := t.TempDir()
-	binaryPath := filepath.Join(tmpDir, "myapp")
+	binaryPath := filepath.Join(tmpDir, daemonpilot.InstalledBinaryName("myapp"))
 	rollbackPath := binaryPath + ".rollback"
 	if err := os.WriteFile(rollbackPath, []byte("previous"), 0o755); err != nil {
 		t.Fatal(err)

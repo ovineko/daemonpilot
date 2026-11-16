@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"io"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
@@ -77,11 +78,11 @@ func TestConfigValidate_LogDirRejectsCronMetacharacters(t *testing.T) {
 // except a crontab command field, so rejecting it there would stop an existing
 // systemd or launchd service carrying a percent-encoded value from booting.
 func TestConfigValidate_AllowsCronMetacharactersOutsideCrontab(t *testing.T) {
+	root := t.TempDir()
 	cfg := Config{
 		Name:               "test",
-		WorkerFunc:         dummyWorker,
-		LogDir:             "/var/log/%Y",
-		InstallDir:         "/opt/100%",
+		LogDir:             filepath.Join(root, "var", "log", "%Y"),
+		InstallDir:         filepath.Join(root, "opt", "100%"),
 		ServiceArguments:   []string{"--url=https://example.test/a%20b"},
 		ServiceEnvironment: map[string]string{"DSN": "postgres://u:p%40ss@h/db"},
 	}

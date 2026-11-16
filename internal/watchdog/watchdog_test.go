@@ -109,6 +109,34 @@ func mockSpecFuncCounting(count *atomic.Int32, exitAfter time.Duration) SpecFunc
 	}
 }
 
+func buildTestChild(t *testing.T, dir, name, mode string) string {
+	t.Helper()
+	path := filepath.Join(dir, daemonpilot.InstalledBinaryName(name))
+	buildTestChildAtPath(t, path, mode)
+	return path
+}
+
+func buildTestChildAtPath(t *testing.T, path, mode string) {
+	t.Helper()
+	fixture := testsupport.Fixture(t, "watchdog-worker-"+mode, "./testdata/portable_worker.go",
+		"-ldflags", "-X main.mode="+mode)
+	data, err := os.ReadFile(fixture)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, data, 0o700); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func testInstalledBinaryPath(cfg *daemonpilot.Config) string {
+	return filepath.Join(cfg.InstallDir, daemonpilot.InstalledBinaryName(cfg.Name))
+}
+
+func testRollbackBinaryPath(cfg *daemonpilot.Config) string {
+	return testInstalledBinaryPath(cfg) + ".rollback"
+}
+
 func TestNew(t *testing.T) {
 	cfg := testConfig()
 	w := New(cfg)
@@ -622,12 +650,7 @@ func TestCheckUpdates_CannotRestartWatchdog_ExecThroughPath(t *testing.T) {
 	w := New(cfg)
 	w.specFunc = mockSpecFunc(10*time.Second, 0)
 
-	scriptContent := "#!/bin/sh\nsleep 30\n"
-	scriptPath := cfg.InstallDir + "/" + cfg.Name
-	// #nosec G306 -- Executable fixture owned by this test.
-	if err := os.WriteFile(scriptPath, []byte(scriptContent), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	buildTestChild(t, cfg.InstallDir, cfg.Name, "run")
 
 	called := false
 	w.updateCheckFn = func(_ context.Context) error {
@@ -701,12 +724,7 @@ func TestRunExecThroughChild_SpawnsChild(t *testing.T) {
 	cfg.Name = "test-child"
 	w := New(cfg)
 
-	scriptContent := "#!/bin/sh\nexit 0\n"
-	scriptPath := cfg.InstallDir + "/" + cfg.Name
-	// #nosec G306 -- Executable fixture owned by this test.
-	if err := os.WriteFile(scriptPath, []byte(scriptContent), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	buildTestChild(t, cfg.InstallDir, cfg.Name, "exit0")
 
 	ctx, cancel := context.WithTimeout(context.Background(), testsupport.Scale(2*time.Second))
 	defer cancel()
@@ -758,34 +776,17 @@ func TestRunExecThroughChild_RestartsChildOnExit(t *testing.T) {
 	cfg.MaxRestartDelay = 100 * time.Millisecond
 	w := New(cfg)
 
-	scriptContent := fmt.Sprintf("#!/bin/sh\ncount_file=%s/count\n"+
-		"if [ -f \"$count_file\" ]; then\n"+
-		"  count=$(cat \"$count_file\")\n"+
-		"else\n"+
-		"  count=0\n"+
-		"fi\n"+
-		"count=$((count + 1))\n"+
-		"echo $count > \"$count_file\"\n"+
-		"if [ $count -le 2 ]; then\n"+
-		"  exit 1\n"+
-		"fi\n"+
-		"sleep 30\n", cfg.InstallDir)
-	scriptPath := cfg.InstallDir + "/" + cfg.Name
-	// #nosec G306 -- Executable fixture owned by this test.
-	if err := os.WriteFile(scriptPath, []byte(scriptContent), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	countFile := filepath.Join(cfg.InstallDir, "count")
+	t.Setenv("WATCHDOG_TEST_COUNT_FILE", countFile)
+	buildTestChild(t, cfg.InstallDir, cfg.Name, "count-exit1")
 
 	ctx, cancel := context.WithTimeout(context.Background(), testsupport.Scale(5*time.Second))
 	defer cancel()
-
 	done := make(chan struct{})
 	go func() {
 		w.runExecThroughChild(ctx)
 		close(done)
 	}()
-
-	countFile := cfg.InstallDir + "/count"
 	childSpawns := func() int {
 		// #nosec G304 -- Reads a fixture from this test's temporary directory.
 		data, err := os.ReadFile(countFile)
@@ -816,12 +817,7 @@ func TestRunExecThroughChild_GracefulShutdownOnSignal(t *testing.T) {
 	cfg.GracefulTimeout = 5 * time.Second
 	w := New(cfg)
 
-	scriptContent := "#!/bin/sh\nsleep 30\n"
-	scriptPath := cfg.InstallDir + "/" + cfg.Name
-	// #nosec G306 -- Executable fixture owned by this test.
-	if err := os.WriteFile(scriptPath, []byte(scriptContent), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	buildTestChild(t, cfg.InstallDir, cfg.Name, "run")
 
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -858,12 +854,7 @@ func TestRunExecThroughChild_SetsProxyMode(t *testing.T) {
 		t.Error("should not be in proxy mode initially")
 	}
 
-	scriptContent := "#!/bin/sh\nsleep 30\n"
-	scriptPath := cfg.InstallDir + "/" + cfg.Name
-	// #nosec G306 -- Executable fixture owned by this test.
-	if err := os.WriteFile(scriptPath, []byte(scriptContent), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	buildTestChild(t, cfg.InstallDir, cfg.Name, "run")
 
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -891,12 +882,7 @@ func TestRunExecThroughChild_NoRestartAfterSignal(t *testing.T) {
 	cfg.MaxRestartDelay = 50 * time.Millisecond
 	w := New(cfg)
 
-	scriptContent := "#!/bin/sh\nsleep 30\n"
-	scriptPath := cfg.InstallDir + "/" + cfg.Name
-	// #nosec G306 -- Executable fixture owned by this test.
-	if err := os.WriteFile(scriptPath, []byte(scriptContent), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	buildTestChild(t, cfg.InstallDir, cfg.Name, "run")
 
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -1125,18 +1111,12 @@ func TestRunExecThroughChild_RollbackOnRepeatedCrashes(t *testing.T) {
 	cfg.StableThreshold = 1 * time.Hour
 	w := New(cfg)
 
-	binaryPath := cfg.InstallDir + "/" + cfg.Name
-	rollbackPath := binaryPath + ".rollback"
-
-	crashScript := "#!/bin/sh\nexit 1\n"
-	// #nosec G306 -- Executable fixture owned by this test.
-	if err := os.WriteFile(binaryPath, []byte(crashScript), 0o755); err != nil {
-		t.Fatal(err)
-	}
-
-	longRunScript := "#!/bin/sh\nsleep 30\n"
-	// #nosec G306 -- Executable fixture owned by this test.
-	if err := os.WriteFile(rollbackPath, []byte(longRunScript), 0o755); err != nil {
+	binaryPath := testInstalledBinaryPath(cfg)
+	rollbackPath := testRollbackBinaryPath(cfg)
+	buildTestChildAtPath(t, binaryPath, "exit1")
+	buildTestChildAtPath(t, rollbackPath, "run")
+	rollbackBytes, err := os.ReadFile(rollbackPath)
+	if err != nil {
 		t.Fatal(err)
 	}
 	recordTestRollbackDigest(t, cfg.InstallDir, cfg.Name, rollbackPath)
@@ -1160,8 +1140,8 @@ func TestRunExecThroughChild_RollbackOnRepeatedCrashes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to read restored binary: %v", err)
 	}
-	if string(restoredData) != longRunScript {
-		t.Error("current binary should contain the rollback (old) script content")
+	if !bytes.Equal(restoredData, rollbackBytes) {
+		t.Error("current binary should contain the restored executable")
 	}
 
 	cancel()
@@ -1177,7 +1157,8 @@ func TestRunExecThroughChild_StableChildExitPreservesRollback(t *testing.T) {
 	binaryPath := w.installedBinaryPath()
 	rollbackPath := w.rollbackBinaryPath()
 	marker := filepath.Join(cfg.InstallDir, "starts")
-	writeFile(t, binaryPath, fmt.Sprintf("#!/bin/sh\necho started >> %q\nsleep 0.2\nexit 1\n", marker))
+	t.Setenv("WATCHDOG_TEST_MARKER", marker)
+	buildTestChildAtPath(t, binaryPath, "marker-exit1")
 	writeFile(t, rollbackPath, "PREVIOUS")
 	recordTestRollbackDigest(t, cfg.InstallDir, cfg.Name, rollbackPath)
 
@@ -1215,20 +1196,10 @@ func TestRunExecThroughChild_OnCriticalFailure_CalledWhenBothFail(t *testing.T) 
 		criticalCalled.Add(1)
 	}
 
-	binaryPath := cfg.InstallDir + "/" + cfg.Name
-	rollbackPath := binaryPath + ".rollback"
-
-	crashScript := "#!/bin/sh\nexit 1\n"
-	// #nosec G306 -- Executable fixture owned by this test.
-	if err := os.WriteFile(binaryPath, []byte(crashScript), 0o755); err != nil {
-		t.Fatal(err)
-	}
-
-	oldCrashScript := "#!/bin/sh\nexit 2\n"
-	// #nosec G306 -- Executable fixture owned by this test.
-	if err := os.WriteFile(rollbackPath, []byte(oldCrashScript), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	binaryPath := testInstalledBinaryPath(cfg)
+	rollbackPath := testRollbackBinaryPath(cfg)
+	buildTestChildAtPath(t, binaryPath, "exit1")
+	buildTestChildAtPath(t, rollbackPath, "exit2")
 	recordTestRollbackDigest(t, cfg.InstallDir, cfg.Name, rollbackPath)
 
 	ctx, cancel := context.WithTimeout(context.Background(), testsupport.Scale(10*time.Second))
@@ -1257,18 +1228,11 @@ func TestRunExecThroughChild_OnCriticalFailure_NilDoesNotPanic(t *testing.T) {
 	cfg.OnCriticalFailure = nil
 	w := New(cfg)
 
-	binaryPath := cfg.InstallDir + "/" + cfg.Name
-	rollbackPath := binaryPath + ".rollback"
-
-	crashScript := "#!/bin/sh\nexit 1\n"
-	// #nosec G306 -- Executable fixture owned by this test.
-	if err := os.WriteFile(binaryPath, []byte(crashScript), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	// #nosec G306 -- Executable fixture owned by this test.
-	if err := os.WriteFile(rollbackPath, []byte(crashScript), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	binaryPath := testInstalledBinaryPath(cfg)
+	rollbackPath := testRollbackBinaryPath(cfg)
+	buildTestChildAtPath(t, binaryPath, "exit1")
+	buildTestChildAtPath(t, rollbackPath, "exit1")
+	recordTestRollbackDigest(t, cfg.InstallDir, cfg.Name, rollbackPath)
 
 	ctx, cancel := context.WithTimeout(context.Background(), testsupport.Scale(3*time.Second))
 	defer cancel()
@@ -1290,12 +1254,8 @@ func TestRunExecThroughChild_NoRollbackFileAvailable(t *testing.T) {
 	cfg.StableThreshold = 1 * time.Hour
 	w := New(cfg)
 
-	binaryPath := cfg.InstallDir + "/" + cfg.Name
-	crashScript := "#!/bin/sh\nexit 1\n"
-	// #nosec G306 -- Executable fixture owned by this test.
-	if err := os.WriteFile(binaryPath, []byte(crashScript), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	binaryPath := testInstalledBinaryPath(cfg)
+	buildTestChildAtPath(t, binaryPath, "exit1")
 
 	ctx, cancel := context.WithTimeout(context.Background(), testsupport.Scale(3*time.Second))
 	defer cancel()
@@ -2088,8 +2048,8 @@ func writeFile(t *testing.T, path, content string) {
 // the .rollback net is deleted and the watchdog keeps running the new binary.
 func TestProbation_StableWorker_Commits(t *testing.T) {
 	cfg := stagedProbationConfig(t)
-	rollbackPath := cfg.InstallDir + "/" + cfg.Name + ".rollback"
-	currentPath := cfg.InstallDir + "/" + cfg.Name
+	rollbackPath := testRollbackBinaryPath(cfg)
+	currentPath := testInstalledBinaryPath(cfg)
 	writeFile(t, rollbackPath, "PREVIOUS")
 	writeFile(t, currentPath, "NEW")
 
@@ -2136,8 +2096,8 @@ func TestProbation_StableWorker_Commits(t *testing.T) {
 // ErrExecRestart so handleRun re-execs it.
 func TestProbation_CrashLoop_RollsBack(t *testing.T) {
 	cfg := stagedProbationConfig(t)
-	rollbackPath := cfg.InstallDir + "/" + cfg.Name + ".rollback"
-	currentPath := cfg.InstallDir + "/" + cfg.Name
+	rollbackPath := testRollbackBinaryPath(cfg)
+	currentPath := testInstalledBinaryPath(cfg)
 	writeFile(t, rollbackPath, "PREVIOUS")
 	writeFile(t, currentPath, "NEW")
 	recordTestRollbackDigest(t, cfg.InstallDir, cfg.Name, rollbackPath)
@@ -2180,8 +2140,8 @@ func TestProbation_CrashLoop_RollsBack(t *testing.T) {
 // signature chain never saw. It stays on the new binary and escalates.
 func TestProbation_RollbackBinaryUnverified_StaysAndEscalates(t *testing.T) {
 	cfg := stagedProbationConfig(t)
-	rollbackPath := cfg.InstallDir + "/" + cfg.Name + ".rollback"
-	currentPath := cfg.InstallDir + "/" + cfg.Name
+	rollbackPath := testRollbackBinaryPath(cfg)
+	currentPath := testInstalledBinaryPath(cfg)
 	writeFile(t, rollbackPath, "PREVIOUS")
 	writeFile(t, currentPath, "NEW")
 	recordTestRollbackDigest(t, cfg.InstallDir, cfg.Name, rollbackPath)
@@ -2235,8 +2195,8 @@ func TestProbation_RollbackBinaryUnverified_StaysAndEscalates(t *testing.T) {
 // binary and escalates via OnCriticalFailure.
 func TestProbation_RollbackBinaryMissing_StaysAndEscalates(t *testing.T) {
 	cfg := stagedProbationConfig(t)
-	rollbackPath := cfg.InstallDir + "/" + cfg.Name + ".rollback"
-	currentPath := cfg.InstallDir + "/" + cfg.Name
+	rollbackPath := testRollbackBinaryPath(cfg)
+	currentPath := testInstalledBinaryPath(cfg)
 	writeFile(t, rollbackPath, "PREVIOUS")
 	writeFile(t, currentPath, "NEW")
 
@@ -2327,8 +2287,8 @@ func TestHandleExecThroughMaxBackoff(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			cfg := testConfig()
 			cfg.InstallDir = t.TempDir()
-			binaryPath := cfg.InstallDir + "/" + cfg.Name
-			rollbackPath := binaryPath + ".rollback"
+			binaryPath := testInstalledBinaryPath(cfg)
+			rollbackPath := testRollbackBinaryPath(cfg)
 			writeFile(t, binaryPath, "NEW")
 			writeFile(t, rollbackPath, "PREVIOUS")
 			recordTestRollbackDigest(t, cfg.InstallDir, cfg.Name, rollbackPath)
@@ -2376,8 +2336,8 @@ func TestHandleExecThroughMaxBackoff(t *testing.T) {
 // and escalates, but the copy must survive for the next attempt.
 func TestProbation_RollbackDigestUnreadable_KeepsTheCopy(t *testing.T) {
 	cfg := stagedProbationConfig(t)
-	rollbackPath := cfg.InstallDir + "/" + cfg.Name + ".rollback"
-	currentPath := cfg.InstallDir + "/" + cfg.Name
+	rollbackPath := testRollbackBinaryPath(cfg)
+	currentPath := testInstalledBinaryPath(cfg)
 	writeFile(t, rollbackPath, "PREVIOUS")
 	writeFile(t, currentPath, "NEW")
 	recordTestRollbackDigest(t, cfg.InstallDir, cfg.Name, rollbackPath)
