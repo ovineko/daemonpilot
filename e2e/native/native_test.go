@@ -293,7 +293,11 @@ func nativeServiceDiagnostics(name, manifestPath, logDir string) string {
 	}
 	stderr, stderrErr := os.ReadFile(filepath.Join(logDir, name+".err.log"))
 	stdout, stdoutErr := os.ReadFile(filepath.Join(logDir, name+".out.log"))
-	return fmt.Sprintf("manifest=%q (read: %v), service output=%q (command: %v), stdout=%q (read: %v), stderr=%q (read: %v)", manifest, manifestErr, output, commandErr, stdout, stdoutErr, stderr, stderrErr)
+	installDir := filepath.Dir(manifestPath)
+	worker, workerErr := os.ReadFile(filepath.Join(installDir, "worker.json"))
+	state, stateErr := os.ReadFile(filepath.Join(installDir, ".daemonpilot-"+name+".json"))
+	rollback, rollbackErr := os.Stat(filepath.Join(installDir, name+exeSuffix()+".rollback"))
+	return fmt.Sprintf("manifest=%q (read: %v), service output=%q (command: %v), worker=%q (read: %v), state=%q (read: %v), rollback=%v (stat: %v), stdout=%q (read: %v), stderr=%q (read: %v)", manifest, manifestErr, output, commandErr, worker, workerErr, state, stateErr, rollback, rollbackErr, stdout, stdoutErr, stderr, stderrErr)
 }
 
 func workerStateAt(path string, previousPID int) bool {
