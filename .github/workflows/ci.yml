@@ -67,7 +67,7 @@ jobs:
       - name: Run quality gate
         run: pnpm dm lint --fail-fast=false
   platform-e2e:
-    if: github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request'
     uses: ./.github/workflows/platform-e2e.yml
   test:
     defaults:
