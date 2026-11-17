@@ -38,7 +38,7 @@ jobs:
       - name: Extract DragonFly BSD test bundle
         run: |
           mkdir -p "$GITHUB_WORKSPACE/.bsdvm"
-          tar -xzf /tmp/bsdvm-artifact/bsdvm.tar.gz -C "$GITHUB_WORKSPACE/.bsdvm" ./run.sh ./packages ./go-version ./dragonfly/amd64
+          tar -xzf /tmp/bsdvm-artifact/bsdvm.tar.gz -C "$GITHUB_WORKSPACE/.bsdvm" ./run.sh ./packages ./go-version ./cmd ./internal ./pkg ./test ./dragonfly/amd64
       - name: Run tests in native guest
         uses: vmactions/dragonflybsd-vm@4ab776fa9f914fbea72f13715b451e77e7ef5c41 # v1.3.4
         with:
@@ -68,7 +68,7 @@ jobs:
           arch="$BSDVM_ARCH"
           case "$arch" in aarch64) arch=arm64 ;; esac
           mkdir -p "$GITHUB_WORKSPACE/.bsdvm"
-          tar -xzf /tmp/bsdvm-artifact/bsdvm.tar.gz -C "$GITHUB_WORKSPACE/.bsdvm" ./run.sh ./packages ./go-version "./freebsd/$arch"
+          tar -xzf /tmp/bsdvm-artifact/bsdvm.tar.gz -C "$GITHUB_WORKSPACE/.bsdvm" ./run.sh ./packages ./go-version ./cmd ./internal ./pkg ./test "./freebsd/$arch"
       - name: Run tests in native guest
         uses: vmactions/freebsd-vm@811efaaac0668df8bfb8308c3ec997b5ab50037b # v1.6.0
         with:
@@ -124,7 +124,7 @@ jobs:
           arch="$BSDVM_ARCH"
           case "$arch" in aarch64) arch=arm64 ;; esac
           mkdir -p "$GITHUB_WORKSPACE/.bsdvm"
-          tar -xzf /tmp/bsdvm-artifact/bsdvm.tar.gz -C "$GITHUB_WORKSPACE/.bsdvm" ./run.sh ./packages ./go-version "./netbsd/$arch"
+          tar -xzf /tmp/bsdvm-artifact/bsdvm.tar.gz -C "$GITHUB_WORKSPACE/.bsdvm" ./run.sh ./packages ./go-version ./cmd ./internal ./pkg ./test "./netbsd/$arch"
       - name: Run tests in native guest
         uses: vmactions/netbsd-vm@5957cf330aef2e6ddc63c604364c99ce2e02b91d # v1.5.3
         with:
@@ -160,7 +160,7 @@ jobs:
           arch="$BSDVM_ARCH"
           case "$arch" in aarch64) arch=arm64 ;; esac
           mkdir -p "$GITHUB_WORKSPACE/.bsdvm"
-          tar -xzf /tmp/bsdvm-artifact/bsdvm.tar.gz -C "$GITHUB_WORKSPACE/.bsdvm" ./run.sh ./packages ./go-version "./openbsd/$arch"
+          tar -xzf /tmp/bsdvm-artifact/bsdvm.tar.gz -C "$GITHUB_WORKSPACE/.bsdvm" ./run.sh ./packages ./go-version ./cmd ./internal ./pkg ./test "./openbsd/$arch"
       - name: Run tests in native guest
         uses: vmactions/openbsd-vm@f1ca8bc8ecc5b6ef7218e5b914836e067e1546d3 # v1.4.9
         with:
