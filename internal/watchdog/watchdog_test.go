@@ -220,7 +220,7 @@ func TestRun_ShutdownOnContextCancel(t *testing.T) {
 		done <- w.Run(ctx)
 	}()
 
-	time.Sleep(100 * time.Millisecond)
+	waitFor(t, "worker running", func() bool { return w.WorkerState().Running })
 	cancel()
 
 	select {
@@ -232,9 +232,7 @@ func TestRun_ShutdownOnContextCancel(t *testing.T) {
 		t.Error("Run() did not return after context cancel")
 	}
 
-	if !w.IsShuttingDown() {
-		t.Error("should be shutting down after context cancel")
-	}
+	waitFor(t, "shutdown after context cancel", w.IsShuttingDown)
 }
 
 func TestRun_WithUpdateConfig(t *testing.T) {

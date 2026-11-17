@@ -408,14 +408,16 @@ No `ps` is required. The packed runner is Linux-only, not a BSD or Windows bundl
 The scripts respect the caller's normal Go cache configuration.
 
 `internal/testsupport.Scale` reads `DAEMONPILOT_TEST_TIME_SCALE`, a positive integer
-that defaults to 1. Invalid values and duration overflow fail explicitly. The
-Docker runner sets 8 on emulated architectures and 1 for native execution,
-including 386 on amd64. Wait deadlines and observation windows scale; polling
-frequencies and arithmetic/validation test inputs retain their meaning. The
-bundle disables the process-wide Go test timeout; each operation remains bounded.
+that defaults to 1. Invalid values and duration overflow fail explicitly.
+The Docker runner uses scale 8 and `DAEMONPILOT_TEST_EMULATED=1` for foreign
+architectures, and scale 1 for native execution. For linux/386 on amd64, it
+probes the guest shell's `/proc/<pid>/exe` because Docker may execute that image
+natively or through qemu-i386. Wait deadlines and observation windows scale;
+polling frequencies and arithmetic/validation test inputs retain their meaning.
+The bundle disables the process-wide Go test timeout; each operation remains bounded.
 A caller can add an outer timeout.
 
-The runner declares `DAEMONPILOT_TEST_EMULATED=1` for foreign architectures. Only
+The runner declares `DAEMONPILOT_TEST_EMULATED=1` only for qemu-user guests. Only
 that explicit declaration skips the two address-space-limit tests: qemu-user's
 own mappings make `RLIMIT_AS` unsuitable for measuring guest memory limits.
 Existing host-facility and race-detector exclusions still apply. Emulation does

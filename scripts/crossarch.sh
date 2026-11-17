@@ -97,9 +97,20 @@ for arch in amd64 arm64 riscv64 arm 386; do
   [ "$arch" != arm ] || platform=linux/arm/v7
   scale=8
   emulated=1
-  if [ "$arch" = "$host" ] || { [ "$arch" = 386 ] && [ "$host" = amd64 ]; }; then
+  if [ "$arch" = "$host" ]; then
     scale=1
     emulated=0
+  elif [ "$arch" = 386 ] && [ "$host" = amd64 ]; then
+    # The amd64 kernel may run 386 natively or route it through qemu-i386.
+    emulator=$(docker run --rm --platform "$platform" --network none \
+      "$(base_image_for "$arch")" sh -c 'readlink /proc/$$/exe')
+    case "$emulator" in
+      */qemu-*) ;;
+      *)
+        scale=1
+        emulated=0
+        ;;
+    esac
   fi
   echo "Running $platform (time scale $scale)"
   if docker run --rm --init --platform "$platform" --network none \
