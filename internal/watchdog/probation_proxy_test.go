@@ -101,9 +101,11 @@ func TestExecThroughProbationHelper(t *testing.T) {
 	cfg := testConfig()
 	cfg.InstallDir, cfg.Name = os.Args[3], "probe-agent"
 	cfg.ExecThrough = true
-	cfg.StableThreshold = 300 * time.Millisecond
+	cfg.StableThreshold = testsupport.Scale(300 * time.Millisecond)
 	cfg.Update = &daemonpilot.UpdateConfig{
-		CheckInterval: time.Hour, RollbackTimeout: 5 * time.Second, StagedRollbackOnUnstable: true,
+		CheckInterval:            time.Hour,
+		RollbackTimeout:          testsupport.Scale(5 * time.Second),
+		StagedRollbackOnUnstable: true,
 	}
 	// Include a health checker so stopping only the worker cannot end Run.
 	cfg.HealthInterval = time.Hour

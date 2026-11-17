@@ -232,7 +232,9 @@ func TestRun_ShutdownOnContextCancel(t *testing.T) {
 		t.Error("Run() did not return after context cancel")
 	}
 
-	waitFor(t, "shutdown after context cancel", w.IsShuttingDown)
+	if !w.IsShuttingDown() {
+		t.Error("should be shutting down after context cancel")
+	}
 }
 
 func TestRun_WithUpdateConfig(t *testing.T) {
