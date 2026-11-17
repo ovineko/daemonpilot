@@ -2030,10 +2030,10 @@ func stagedProbationConfig(t *testing.T) *daemonpilot.Config {
 	cfg := testConfig()
 	cfg.InstallDir = t.TempDir()
 	cfg.Name = "probe-agent"
-	cfg.StableThreshold = 300 * time.Millisecond
+	cfg.StableThreshold = testsupport.Scale(300 * time.Millisecond)
 	cfg.Update = &daemonpilot.UpdateConfig{
 		CheckInterval:            time.Hour,
-		RollbackTimeout:          3 * time.Second,
+		RollbackTimeout:          testsupport.Scale(3 * time.Second),
 		StagedRollbackOnUnstable: true,
 	}
 	return cfg
