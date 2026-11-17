@@ -3,7 +3,7 @@ module github.com/ovineko/daemonpilot
 go 1.26.0
 
 require (
-	github.com/ovineko/procguard v0.0.0-20261114121417-1921b515269a
+	github.com/ovineko/procguard v0.1.1
 	github.com/prometheus/client_golang v1.25.0
 	github.com/prometheus/client_model v0.6.3
 	golang.org/x/sys v0.49.0
