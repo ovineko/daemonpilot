@@ -55,6 +55,12 @@ case "$os" in dragonfly) ;; freebsd|openbsd|netbsd) ;; *) echo "Unsupported gues
 case $(uname -m) in
   amd64|x86_64) arch=amd64 ;;
   arm64|aarch64) arch=arm64 ;;
+  evbarm)
+    case $(uname -p) in
+      aarch64|arm64|earmv8) arch=arm64 ;;
+      *) echo "Unsupported guest architecture: $(uname -m) ($(uname -p))" >&2; exit 2 ;;
+    esac
+    ;;
   *) echo "Unsupported guest architecture: $(uname -m)" >&2; exit 2 ;;
 esac
 bundle="$root/$os/$arch"
