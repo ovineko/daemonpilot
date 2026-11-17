@@ -211,12 +211,12 @@ Windows runs the Windows service-manifest tests and native SCM lifecycle journey
 init-manager adapter tests and host-detection tests are constrained to non-Windows hosts;
 portable parser, scope, and shared API tests still run on Windows.
 
-`.github/workflows/platform-e2e.yml` runs on manual dispatch and a weekly schedule. It
-executes all untagged Go test packages inside Linux containers on amd64, arm64, riscv64,
-arm, and 386, and in BSD VM guests on FreeBSD/OpenBSD/NetBSD amd64/arm64 plus DragonFly
-amd64. BSD bundles are cross-built on Linux and test binaries execute in the native BSD
-guests; this does not provide a BSD init-system provider or real-init service journey.
-Cross-compilation alone does not establish runtime behavior.
+`.github/workflows/platform-e2e.yml` runs weekly and on manual dispatch; `.github/workflows/ci.yml`
+also calls it when CI is manually dispatched. It executes all untagged Go test packages inside
+Linux containers on amd64, arm64, riscv64, arm, and 386, and in BSD VM guests on
+FreeBSD/OpenBSD/NetBSD amd64/arm64 plus DragonFly amd64. BSD bundles are cross-built on
+Linux and execute in native BSD guests; this does not provide a BSD init-system provider
+or real-init service journey. Cross-compilation alone does not establish runtime behavior.
 
 ## Real init matrix
 

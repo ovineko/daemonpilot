@@ -162,6 +162,7 @@ name: Platform runtime E2E
 on:
   schedule:
     - cron: "23 6 * * 6"
+  workflow_call: {}
   workflow_dispatch:
 permissions:
   contents: read
