@@ -540,7 +540,8 @@ func (m *crontabManager) Start() error {
 				if err != nil {
 					return fmt.Errorf("malformed crontab entry for %s: %w", m.serviceName, err)
 				}
-				out, err := m.executor.Run("sh", "-c", "("+cmdPart+") </dev/null >/dev/null 2>&1 &")
+				// Redirect both shells so OpenBSD background jobs cannot retain CombinedOutput pipes.
+				out, err := m.executor.Run("sh", "-c", "exec </dev/null >/dev/null 2>&1; ("+cmdPart+") </dev/null >/dev/null 2>&1 &")
 				if err != nil {
 					return runErr("starting service", out, err)
 				}

@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/user"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -407,7 +408,7 @@ func TestHandleInstall_CrontabRebootCaveat(t *testing.T) {
 			mock := &mockServiceManager{nameVal: tt.initName}
 			detectManager = func() (daemon.ServiceManager, error) { return mock, nil }
 			initManager = func(daemon.ServiceManager, daemon.ManagerOptions) error { return nil }
-			getExecutable = func() (string, error) { return "/opt/testapp/testapp", nil }
+			getExecutable = func() (string, error) { return filepath.Join("/opt/testapp", InstalledBinaryName("testapp")), nil }
 			mkdirAll = func(string, os.FileMode) error { return nil }
 			copyFileFn = func(string, string) error { return nil }
 			saveStateFn = func(string, *StateData) error { return nil }
@@ -476,8 +477,9 @@ func TestHandleInstall(t *testing.T) {
 		if mock.installConfig.Description != "Test application" {
 			t.Errorf("expected description 'Test application', got %s", mock.installConfig.Description)
 		}
-		if mock.installConfig.ExecPath != "/opt/testapp/testapp" {
-			t.Errorf("expected exec path /opt/testapp/testapp, got %s", mock.installConfig.ExecPath)
+		wantBinaryPath := filepath.Join("/opt/testapp", InstalledBinaryName("testapp"))
+		if mock.installConfig.ExecPath != wantBinaryPath {
+			t.Errorf("expected exec path %s, got %s", wantBinaryPath, mock.installConfig.ExecPath)
 		}
 		if mock.installConfig.InstallDir != "/opt/testapp" {
 			t.Errorf("expected install dir /opt/testapp, got %s", mock.installConfig.InstallDir)
@@ -491,8 +493,8 @@ func TestHandleInstall(t *testing.T) {
 		if copySrc != "/usr/bin/myapp" {
 			t.Errorf("expected copy src /usr/bin/myapp, got %s", copySrc)
 		}
-		if copyDst != "/opt/testapp/testapp" {
-			t.Errorf("expected copy dst /opt/testapp/testapp, got %s", copyDst)
+		if copyDst != wantBinaryPath {
+			t.Errorf("expected copy dst %s, got %s", wantBinaryPath, copyDst)
 		}
 		if !mock.enableCalled {
 			t.Fatal("expected Enable to be called")
@@ -515,7 +517,7 @@ func TestHandleInstall(t *testing.T) {
 
 		detectManager = func() (daemon.ServiceManager, error) { return mock, nil }
 		initManager = daemon.InitServiceManagerWithOptions
-		getExecutable = func() (string, error) { return "/opt/testapp/testapp", nil }
+		getExecutable = func() (string, error) { return filepath.Join("/opt/testapp", InstalledBinaryName("testapp")), nil }
 		saveStateFn = func(_ string, _ *StateData) error { return nil }
 		mkdirAll = func(_ string, _ os.FileMode) error {
 			mkdirCalled = true
@@ -787,7 +789,7 @@ func TestHandleInstall_LogsManifestPath(t *testing.T) {
 
 	detectManager = func() (daemon.ServiceManager, error) { return mock, nil }
 	initManager = daemon.InitServiceManagerWithOptions
-	getExecutable = func() (string, error) { return "/opt/testapp/testapp", nil }
+	getExecutable = func() (string, error) { return filepath.Join("/opt/testapp", InstalledBinaryName("testapp")), nil }
 	mkdirAll = func(_ string, _ os.FileMode) error { return nil }
 	copyFileFn = func(_, _ string) error { return nil }
 	saveStateFn = func(_ string, _ *StateData) error { return nil }
@@ -1115,7 +1117,7 @@ func TestHandleUninstall(t *testing.T) {
 			name    string
 			present []string
 		}{
-			{name: "all artifacts present", present: []string{".lock", ".new", ".rollback", ".rollback.invalid"}},
+			{name: "all artifacts present", present: []string{".lock", ".new", ".rollback", ".rollback.invalid", ".superseded-old"}},
 			{name: "only rollback present", present: []string{".rollback"}},
 			{name: "no artifacts present", present: nil},
 		}
@@ -1137,14 +1139,24 @@ func TestHandleUninstall(t *testing.T) {
 				deleteStateFn = func(string, string) error { return nil }
 				loadStateFn = installedState("testapp")
 
-				binaryPath := filepath.Join(installDir, "testapp")
+				binaryPath := filepath.Join(installDir, InstalledBinaryName("testapp"))
+				lockPath := filepath.Join(installDir, "testapp.lock")
 				// #nosec G306 -- Executable fixture owned by this test.
 				if err := os.WriteFile(binaryPath, []byte("binary"), 0o755); err != nil {
 					t.Fatal(err)
 				}
 				for _, suffix := range tt.present {
+					artifactPath := binaryPath
+					switch suffix {
+					case ".lock":
+						artifactPath = lockPath
+					case ".new":
+						artifactPath = StagedNewPath(binaryPath)
+					default:
+						artifactPath += suffix
+					}
 					// #nosec G306 -- Executable fixture owned by this test.
-					if err := os.WriteFile(binaryPath+suffix, []byte("artifact"), 0o644); err != nil {
+					if err := os.WriteFile(artifactPath, []byte("artifact"), 0o644); err != nil {
 						t.Fatal(err)
 					}
 				}
@@ -1170,10 +1182,20 @@ func TestHandleUninstall(t *testing.T) {
 					t.Fatalf("unexpected error: %v", err)
 				}
 
-				for _, suffix := range []string{".lock", ".new", ".rollback", ".rollback.invalid"} {
-					if _, err := os.Stat(binaryPath + suffix); !os.IsNotExist(err) {
-						t.Errorf("expected %s to be removed, stat error = %v", binaryPath+suffix, err)
+				for _, suffix := range []string{".rollback", ".rollback.invalid"} {
+					path := binaryPath + suffix
+					if _, err := os.Stat(path); !os.IsNotExist(err) {
+						t.Errorf("expected %s to be removed, stat error = %v", path, err)
 					}
+				}
+				if _, err := os.Stat(StagedNewPath(binaryPath)); !os.IsNotExist(err) {
+					t.Errorf("expected %s to be removed, stat error = %v", StagedNewPath(binaryPath), err)
+				}
+				if _, err := os.Stat(binaryPath + SupersededBinarySuffix + "old"); !os.IsNotExist(err) {
+					t.Errorf("expected superseded image to be removed, stat error = %v", err)
+				}
+				if _, err := os.Stat(lockPath); !os.IsNotExist(err) {
+					t.Errorf("expected %s to be removed, stat error = %v", lockPath, err)
 				}
 				if _, err := os.Stat(manifestBackup); !os.IsNotExist(err) {
 					t.Errorf("expected %s to be removed, stat error = %v", manifestBackup, err)
@@ -1262,7 +1284,7 @@ func TestCopyFile(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if info.Mode().Perm()&0o111 == 0 {
+		if runtime.GOOS != "windows" && info.Mode().Perm()&0o111 == 0 {
 			t.Error("expected destination file to be executable")
 		}
 	})
@@ -1527,8 +1549,9 @@ func TestHandleRun(t *testing.T) {
 			checkRollbackRet: true,
 			handleRollbackFn: func(_ context.Context, path string, timeout time.Duration) error {
 				rollbackHandled = true
-				if path != "/opt/testapp/testapp.rollback" {
-					t.Errorf("unexpected rollback path: %s", path)
+				wantRollback := filepath.Join("/opt/testapp", InstalledBinaryName("testapp")) + ".rollback"
+				if path != wantRollback {
+					t.Errorf("unexpected rollback path: %s, want %s", path, wantRollback)
 				}
 				if timeout != 5*time.Minute {
 					t.Errorf("unexpected timeout: %v", timeout)
@@ -1603,8 +1626,9 @@ func TestHandleRun(t *testing.T) {
 		if mr.runCalled {
 			t.Fatal("expected watchdog Run NOT to be called when rollback was restored")
 		}
-		if execPath != "/opt/testapp/testapp" {
-			t.Fatalf("expected execSelfFn called with binary path, got %q", execPath)
+		wantBinaryPath := filepath.Join("/opt/testapp", InstalledBinaryName("testapp"))
+		if execPath != wantBinaryPath {
+			t.Fatalf("expected execSelfFn called with binary path %q, got %q", wantBinaryPath, execPath)
 		}
 	})
 
@@ -1722,7 +1746,7 @@ func TestHandleRun(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		wantPath := filepath.Join("/opt/testapp", "testapp")
+		wantPath := filepath.Join("/opt/testapp", InstalledBinaryName("testapp"))
 		if execPath != wantPath {
 			t.Errorf("execSelf called with %q, want %q", execPath, wantPath)
 		}
@@ -3122,7 +3146,7 @@ func TestHandleInstallWithPatchers(t *testing.T) {
 		initSystemTypeFn = func(_ daemon.ServiceManager) string { return "systemd" }
 		detectManager = func() (daemon.ServiceManager, error) { return mock, nil }
 		initManager = func(daemon.ServiceManager, daemon.ManagerOptions) error { return nil }
-		getExecutable = func() (string, error) { return "/opt/testapp/testapp", nil }
+		getExecutable = func() (string, error) { return filepath.Join("/opt/testapp", InstalledBinaryName("testapp")), nil }
 		saveStateFn = func(_ string, _ *StateData) error { return nil }
 
 		patcherCalled := false
@@ -3166,7 +3190,7 @@ func TestHandleInstallWithPatchers(t *testing.T) {
 		mock := &mockServiceManager{}
 		detectManager = func() (daemon.ServiceManager, error) { return mock, nil }
 		initManager = func(daemon.ServiceManager, daemon.ManagerOptions) error { return nil }
-		getExecutable = func() (string, error) { return "/opt/testapp/testapp", nil }
+		getExecutable = func() (string, error) { return filepath.Join("/opt/testapp", InstalledBinaryName("testapp")), nil }
 		saveStateFn = func(_ string, _ *StateData) error { return nil }
 
 		cfg := &Config{
@@ -3199,7 +3223,7 @@ func TestHandleInstall_SavesState(t *testing.T) {
 		mock := &mockServiceManager{manifestPath: "/etc/systemd/system/testapp.service"}
 		detectManager = func() (daemon.ServiceManager, error) { return mock, nil }
 		initManager = daemon.InitServiceManagerWithOptions
-		getExecutable = func() (string, error) { return "/opt/testapp/testapp", nil }
+		getExecutable = func() (string, error) { return filepath.Join("/opt/testapp", InstalledBinaryName("testapp")), nil }
 
 		var savedState *StateData
 		var savedInstallDir string
@@ -3235,8 +3259,9 @@ func TestHandleInstall_SavesState(t *testing.T) {
 		if savedState.ManifestPath != "/etc/systemd/system/testapp.service" {
 			t.Errorf("expected manifest path, got %s", savedState.ManifestPath)
 		}
-		if savedState.BinaryPath != "/opt/testapp/testapp" {
-			t.Errorf("expected binary path /opt/testapp/testapp, got %s", savedState.BinaryPath)
+		wantBinaryPath := filepath.Join("/opt/testapp", InstalledBinaryName("testapp"))
+		if savedState.BinaryPath != wantBinaryPath {
+			t.Errorf("expected binary path %s, got %s", wantBinaryPath, savedState.BinaryPath)
 		}
 		if !savedState.InstalledAt.Equal(fixedTime) {
 			t.Errorf("expected installed at %v, got %v", fixedTime, savedState.InstalledAt)
@@ -3256,7 +3281,7 @@ func TestHandleInstall_SavesState(t *testing.T) {
 		mock := &mockServiceManager{}
 		detectManager = func() (daemon.ServiceManager, error) { return mock, nil }
 		initManager = daemon.InitServiceManagerWithOptions
-		getExecutable = func() (string, error) { return "/opt/testapp/testapp", nil }
+		getExecutable = func() (string, error) { return filepath.Join("/opt/testapp", InstalledBinaryName("testapp")), nil }
 		saveStateFn = func(_ string, _ *StateData) error {
 			return errors.New("write error")
 		}
@@ -3378,8 +3403,9 @@ func TestBuildServiceConfig(t *testing.T) {
 	if svc.Description != "Test application" {
 		t.Errorf("expected Description 'Test application', got %s", svc.Description)
 	}
-	if svc.ExecPath != "/opt/testapp/testapp" {
-		t.Errorf("expected ExecPath /opt/testapp/testapp, got %s", svc.ExecPath)
+	wantBinaryPath := filepath.Join("/opt/testapp", InstalledBinaryName("testapp"))
+	if svc.ExecPath != wantBinaryPath {
+		t.Errorf("expected ExecPath %s, got %s", wantBinaryPath, svc.ExecPath)
 	}
 	if svc.InstallDir != "/opt/testapp" {
 		t.Errorf("expected InstallDir /opt/testapp, got %s", svc.InstallDir)
@@ -4994,7 +5020,7 @@ func TestLifecycleReadsLegacyStateAsSystemScope(t *testing.T) {
 // records, so uninstall would report the service as not installed and refuse to
 // remove it.
 func TestHandleInstall_RollsBackCopiedBinary(t *testing.T) {
-	const destPath = "/opt/testapp/testapp"
+	destPath := filepath.Join("/opt/testapp", InstalledBinaryName("testapp"))
 
 	tests := []struct {
 		name        string
@@ -5516,7 +5542,7 @@ func TestHandleInstallPreservesRollbackDigest(t *testing.T) {
 			mock := &mockServiceManager{manifestPath: "/etc/systemd/system/testapp.service"}
 			detectManager = func() (daemon.ServiceManager, error) { return mock, nil }
 			initManager = daemon.InitServiceManagerWithOptions
-			getExecutable = func() (string, error) { return "/opt/testapp/testapp", nil }
+			getExecutable = func() (string, error) { return filepath.Join("/opt/testapp", InstalledBinaryName("testapp")), nil }
 			loadStateFn = func(_, _ string) (*StateData, error) {
 				return tt.state, nil
 			}

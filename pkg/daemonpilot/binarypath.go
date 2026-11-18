@@ -54,4 +54,8 @@ func stagedNewPathFor(binaryPath, goos string) string {
 // LegacyStagedNewPath identifies the old staging filename for cleanup.
 func LegacyStagedNewPath(binaryPath string) string { return binaryPath + stagedNewSuffix }
 
+// SupersededBinarySuffix marks an image moved aside because Windows cannot
+// overwrite a running executable. The updater sweeps these files on restart.
+const SupersededBinarySuffix = ".superseded-"
+
 const stagedNewSuffix = ".new"

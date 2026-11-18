@@ -13,19 +13,15 @@ import (
 	"github.com/ovineko/daemonpilot/internal/daemon"
 )
 
-// readOnlyDir creates a directory that refuses new entries. Running as root
-// bypasses the mode bits entirely, so the tests that need a refusal skip there
-// rather than asserting something the host cannot provide.
+// readOnlyDir creates a directory that refuses new entries using the host's
+// native permission mechanism.
 func readOnlyDir(t *testing.T) string {
 	t.Helper()
-	if os.Geteuid() == 0 {
-		t.Skip("running as root: directory permissions do not deny writes")
-	}
 	dir := filepath.Join(t.TempDir(), "readonly")
-	if err := os.Mkdir(dir, 0o500); err != nil {
+	if err := os.Mkdir(dir, 0o700); err != nil {
 		t.Fatalf("Mkdir() error: %v", err)
 	}
-	t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
+	makeReadOnlyDirectory(t, dir)
 	return dir
 }
 
@@ -168,12 +164,15 @@ func TestPreflightInstall(t *testing.T) {
 // directory is bound to it. Resolving that against the CLI's working directory
 // would refuse the install over a directory the install never writes to.
 func TestPreflightInstallIgnoresRelativeManifestPath(t *testing.T) {
-	writable := t.TempDir()
-	t.Chdir(readOnlyDir(t))
-
-	cfg := &Config{Name: "myapp", InstallDir: writable, Logger: NewDefaultLogger(LogLevelInfo)}
-	if err := preflightInstall(cfg, ".daemonpilot-crontab-myapp.entry"); err != nil {
-		t.Fatalf("preflightInstall() error: %v", err)
+	readOnly := readOnlyDir(t)
+	manifestPath := ".daemonpilot-crontab-myapp.entry"
+	cfg := &Config{Name: "myapp", InstallDir: readOnly, Logger: NewDefaultLogger(LogLevelInfo)}
+	err := preflightInstall(cfg, manifestPath)
+	if err == nil {
+		t.Fatal("preflightInstall() error = nil, want install-directory probe failure")
+	}
+	if !strings.Contains(err.Error(), "probed paths: install directory") || strings.Contains(err.Error(), "manifest directory") {
+		t.Errorf("relative manifest was not ignored in probed paths: %v", err)
 	}
 }
 
@@ -363,11 +362,13 @@ func stubCrossScopeStat(t *testing.T, present ...string) {
 
 func TestPreflightCrossScope(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	for _, key := range []string{"HOME", "USERPROFILE", "HOMEDRIVE", "HOMEPATH"} {
+		t.Setenv(key, home)
+	}
 
-	systemUnit := "/etc/systemd/system/myapp.service"
+	systemUnit := filepath.Join("/etc/systemd/system", "myapp.service")
 	userUnit := filepath.Join(home, ".config", "systemd", "user", "myapp.service")
-	systemPlist := "/Library/LaunchDaemons/com.myapp.plist"
+	systemPlist := filepath.Join("/Library/LaunchDaemons", "com.myapp.plist")
 	userPlist := filepath.Join(home, "Library", "LaunchAgents", "com.myapp.plist")
 
 	tests := []struct {
@@ -457,7 +458,9 @@ func TestPreflightCrossScope(t *testing.T) {
 // TestCrossScopeManifestPathIsUnresolvable covers the paths that cannot be
 // derived: an unknown init system, and a user path with no home directory.
 func TestCrossScopeManifestPathIsUnresolvable(t *testing.T) {
-	t.Setenv("HOME", "")
+	for _, key := range []string{"HOME", "USERPROFILE", "HOMEDRIVE", "HOMEPATH"} {
+		t.Setenv(key, "")
+	}
 
 	if got := crossScopeManifestPath("no-such-init", "myapp", ScopeUser); got != "" {
 		t.Errorf("crossScopeManifestPath() = %q, want an empty path", got)
@@ -523,7 +526,7 @@ func TestHandleInstallFailsOnExecProbe(t *testing.T) {
 	if !errors.Is(err, ErrNotExecutable) {
 		t.Fatalf("handleInstall() error = %v, want ErrNotExecutable", err)
 	}
-	if probed != filepath.Join("/opt/myapp", "myapp") {
+	if probed != filepath.Join("/opt/myapp", InstalledBinaryName("myapp")) {
 		t.Errorf("probed %q, want the installed binary path", probed)
 	}
 	if mock.installCalled {

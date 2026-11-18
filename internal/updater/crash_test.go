@@ -84,7 +84,10 @@ func runCrashHelper(stage string) {
 		if reached == stage {
 			// No defers run, no error returns, no undo: this is the
 			// process-death class, not a returned failure.
-			_ = syscall.Kill(os.Getpid(), syscall.SIGKILL)
+			if err := syscall.Kill(os.Getpid(), syscall.SIGKILL); err != nil {
+				os.Exit(43)
+			}
+			select {}
 		}
 	}
 	info := &daemonpilot.UpdateInfo{Version: "2.0.0", WatchdogVersion: "2"}

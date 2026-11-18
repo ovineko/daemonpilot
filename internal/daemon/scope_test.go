@@ -1,6 +1,9 @@
 package daemon
 
-import "testing"
+import (
+	"runtime"
+	"testing"
+)
 
 func TestScopeString(t *testing.T) {
 	tests := []struct {
@@ -45,19 +48,25 @@ func TestManagerOptionsZeroScopeIsSystem(t *testing.T) {
 // finit, sysvinit, busybox and procd have no per-user notion at all, and dinit,
 // runit and s6 are deferred because they would require bootstrapping a
 // supervisor for the supervisor.
-var scopeSupport = map[string]bool{
-	"systemd":  true,
-	"launchd":  true,
-	"crontab":  true,
-	"openrc":   false,
-	"dinit":    false,
-	"finit":    false,
-	"runit":    false,
-	"s6":       false,
-	"procd":    false,
-	"busybox":  false,
-	"sysvinit": false,
-}
+var scopeSupport = func() map[string]bool {
+	supported := map[string]bool{
+		"systemd":  true,
+		"launchd":  true,
+		"crontab":  true,
+		"openrc":   false,
+		"dinit":    false,
+		"finit":    false,
+		"runit":    false,
+		"s6":       false,
+		"procd":    false,
+		"busybox":  false,
+		"sysvinit": false,
+	}
+	if runtime.GOOS == "windows" {
+		supported["windows-service"] = false
+	}
+	return supported
+}()
 
 func TestSupportsScopeAllManagers(t *testing.T) {
 	for _, d := range defaultDetectors() {

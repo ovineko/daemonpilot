@@ -1,3 +1,5 @@
+//go:build unix
+
 package daemonpilot
 
 import (
@@ -47,34 +49,6 @@ func TestSdNotifySendsMessage(t *testing.T) {
 	defer func() { _ = conn.Close() }()
 
 	t.Setenv("NOTIFY_SOCKET", sockPath)
-
-	if err := sdNotifyReady(); err != nil {
-		t.Fatalf("sdNotify: %v", err)
-	}
-
-	if err := conn.SetReadDeadline(time.Now().Add(testsupport.Scale(time.Second))); err != nil {
-		t.Fatal(err)
-	}
-	buf := make([]byte, 128)
-	n, err := conn.Read(buf)
-	if err != nil {
-		t.Fatalf("Read: %v", err)
-	}
-	got := string(buf[:n])
-	if got != "READY=1" {
-		t.Errorf("got %q, want %q", got, "READY=1")
-	}
-}
-
-func TestSdNotifyAbstractSocket(t *testing.T) {
-	addr := &net.UnixAddr{Name: "\x00daemonpilot-test-notify", Net: "unixgram"}
-	conn, err := net.ListenUnixgram("unixgram", addr)
-	if err != nil {
-		t.Skipf("abstract sockets not supported: %v", err)
-	}
-	defer func() { _ = conn.Close() }()
-
-	t.Setenv("NOTIFY_SOCKET", "@daemonpilot-test-notify")
 
 	if err := sdNotifyReady(); err != nil {
 		t.Fatalf("sdNotify: %v", err)

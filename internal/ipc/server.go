@@ -88,10 +88,14 @@ func (s *Server) SetReadyHandler(h ReadyHandler) {
 	}
 }
 
-// Serve processes IPC requests until the context is cancelled or the request
-// pipe is closed. It should be run in a goroutine.
+// Serve processes IPC requests until the request pipe closes or a response write fails.
+// Context cancellation closes the response side; Windows waits for the synchronous
+// request read to complete before closing its reader.
 func (s *Server) Serve(ctx context.Context) {
-	defer close(s.done)
+	defer func() {
+		_ = s.requestR.Close()
+		close(s.done)
+	}()
 
 	go func() {
 		select {
@@ -129,12 +133,12 @@ func (s *Server) Serve(ctx context.Context) {
 	}
 }
 
-// Close shuts down the server by closing its pipe ends, which unblocks any
-// pending reads in Serve.
+// Close shuts down the server. On Windows, Serve closes the request reader
+// after its synchronous pipe read completes to avoid blocking this caller.
 func (s *Server) Close() {
 	s.closeOnce.Do(func() {
-		_ = s.requestR.Close()
 		_ = s.responseW.Close()
+		closeRequestReader(s.requestR)
 	})
 }
 

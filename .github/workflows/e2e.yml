@@ -6,7 +6,6 @@ jobs:
     env:
       DAEMONPILOT_E2E_REQUIRE: "1"
       GOWORK: "off"
-    if: vars.DAEMONPILOT_E2E_ENABLED == 'true'
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout daemonpilot
@@ -33,7 +32,6 @@ jobs:
     env:
       DAEMONPILOT_E2E_REQUIRE: "1"
       GOWORK: "off"
-    if: vars.DAEMONPILOT_E2E_ENABLED == 'true'
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout daemonpilot
@@ -55,6 +53,8 @@ jobs:
     timeout-minutes: 75
 name: Docker end-to-end contracts
 on:
+  schedule:
+    - cron: "23 7 * * 6"
   workflow_dispatch: {}
 permissions:
   contents: read

@@ -1,3 +1,5 @@
+//go:build !windows
+
 package daemon
 
 import (
@@ -7,6 +9,7 @@ import (
 	"log/slog"
 	"os"
 	"os/user"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -1648,7 +1651,7 @@ func systemdEntry(host, userManager bool) detectorEntry {
 		create: func() ServiceManager {
 			return &systemdManager{
 				statFunc: func(path string) (os.FileInfo, error) {
-					if path == "/run/user/1000/systemd/private" && userManager {
+					if path == filepath.Join("/run/user", "1000", "systemd", "private") && userManager {
 						return mockFileInfo{name: path}, nil
 					}
 					return nil, os.ErrNotExist

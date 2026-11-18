@@ -158,6 +158,48 @@ func parseWindowsServiceConfig(content string) (windowsServiceDef, error) {
 	return def, nil
 }
 
+func updateWindowsServiceImagePath(content, imagePath string) (string, error) {
+	def, err := parseWindowsServiceConfig(content)
+	if err != nil {
+		return "", err
+	}
+	config := ServiceConfig{Name: def.Name, Description: def.Description, Arguments: def.Arguments}
+	if err := validateServiceText(config, imagePath, "windows"); err != nil {
+		return "", err
+	}
+	binaryPath := WindowsCommandLine(imagePath, def.Arguments)
+	lines := strings.SplitAfter(content, "\n")
+	imagePathSeen, binaryPathSeen := false, false
+	for i, line := range lines {
+		text := strings.TrimSuffix(strings.TrimSuffix(line, "\n"), "\r")
+		ending := line[len(text):]
+		switch {
+		case strings.HasPrefix(text, "ImagePath="):
+			if imagePathSeen {
+				return "", errors.New("windows: manifest has duplicate ImagePath fields")
+			}
+			imagePathSeen = true
+			lines[i] = "ImagePath=" + imagePath + ending
+		case strings.HasPrefix(text, "BinaryPath="):
+			if binaryPathSeen {
+				return "", errors.New("windows: manifest has duplicate BinaryPath fields")
+			}
+			binaryPathSeen = true
+			lines[i] = "BinaryPath=" + binaryPath + ending
+		}
+	}
+	if !binaryPathSeen {
+		return "", errors.New("windows: manifest has no BinaryPath")
+	}
+	if !imagePathSeen {
+		if len(lines) > 0 && !strings.HasSuffix(lines[len(lines)-1], "\n") {
+			lines[len(lines)-1] += "\n"
+		}
+		lines = append(lines, "ImagePath="+imagePath+"\n")
+	}
+	return strings.Join(lines, ""), nil
+}
+
 // WindowsCommandLine builds the single string the SCM stores as a service's binary
 // path, quoted so CommandLineToArgvW — which is what the started process parses it
 // back with — recovers exactly exe and args.

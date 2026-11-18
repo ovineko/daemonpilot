@@ -8,12 +8,14 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/ovineko/daemonpilot/pkg/daemonpilot"
 )
 
 // supersededSuffix marks a binary that was moved aside because it could not be
 // overwritten in place. Distinctive enough that the sweep can never match a real
 // artifact, and it carries a timestamp so two updates cannot collide.
-const supersededSuffix = ".superseded-"
+const supersededSuffix = daemonpilot.SupersededBinarySuffix
 
 var renameFile = os.Rename
 

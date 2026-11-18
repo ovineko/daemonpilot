@@ -2,10 +2,11 @@
 
 ## Layers and commands
 
-Unit tests exercise policy and platform adapters. Unix datagram notification
-tests skip only when the host denies socket creation or reports `ENOSYS`;
-unrelated listen errors remain failures. Integration journeys build fixture
-binaries in temporary directories and exercise real processes and files.
+Unit tests exercise policy and platform adapters. Filesystem Unix datagram
+notification tests skip only when the host denies socket creation or reports
+`ENOSYS`; the NUL-prefixed abstract-socket test is Linux-only. Other listen errors
+remain failures. Integration journeys build fixture binaries in temporary directories
+and exercise real processes and files.
 The Docker lifecycle layer adds a Linux PID namespace and two real userlands.
 The real-init layer adds installation, container-reboot persistence, and
 service-manager restart contracts (see the matrix below).
@@ -197,17 +198,26 @@ and native results do not prove PID namespace behavior.
 
 ## Continuous integration
 
-`.github/workflows/e2e.yml` has a manual trigger and every job is gated on
-`vars.DAEMONPILOT_E2E_ENABLED == 'true'`. It uses Ubuntu 24.04 and SHA-pinned actions.
-The jobs download the published procguard version pinned in `go.mod` and verify
-it against `go.sum`, without a separate dependency checkout or revision override.
-They run tagged vetting, native companion contracts, and
-the corresponding Docker matrix. A disabled or untriggered job is not evidence
-of a passing matrix.
+`.github/workflows/e2e.yml` runs the Linux lifecycle Docker profiles and full real-init
+matrix on manual dispatch and a weekly schedule. Docker absence, build failures, image
+failures, and assertion failures are not skipped.
 
-The regular CI workflow runs vetting, tests and race tests on Ubuntu and macOS,
-plus build/vet cross-compilation for Linux, Darwin, FreeBSD, OpenBSD and Windows
-on amd64 and arm64. Cross-compilation does not establish runtime behavior.
+The regular `.github/workflows/ci.yml` runs build, vet, unit tests, race tests where
+supported, and `go test -count=3 ./test/...` on Linux amd64/arm64, macOS 15 Intel/arm64,
+and Windows 2025 amd64 plus Windows 11 arm64. Native service E2E runs on macOS and
+Windows; Windows runner privileges are required for SCM installation. Race detection
+runs on Windows amd64, not Windows arm64.
+Windows runs the Windows service-manifest tests and native SCM lifecycle journey. POSIX
+init-manager adapter tests and host-detection tests are constrained to non-Windows hosts;
+portable parser, scope, and shared API tests still run on Windows.
+
+`.github/workflows/platform-e2e.yml` runs weekly and on manual dispatch.
+`.github/workflows/ci.yml` calls it on every pull request and for manual CI dispatch.
+It executes all untagged Go test packages inside Linux containers on amd64, arm64, riscv64,
+arm, and 386, and in BSD VM guests on
+FreeBSD/OpenBSD/NetBSD amd64/arm64 plus DragonFly amd64. BSD bundles are cross-built on
+Linux and execute in native BSD guests; this does not provide a BSD init-system provider
+or real-init service journey. Cross-compilation alone does not establish runtime behavior.
 
 ## Real init matrix
 
@@ -364,8 +374,9 @@ sh scripts/crossarch.sh docker
 pnpm dm exec task -- test:crossarch
 ```
 
-The runner compiles every untagged package with tests using `go test -c`, plus
-three fixture executables, with `CGO_ENABLED=0`. It runs linux/amd64, arm64,
+The runner compiles every untagged package with tests using `go test -c`, and
+bundles the lifecycle, process, update, probe, exec-through v2/v3, watchdog
+worker-mode, and crash fixtures with `CGO_ENABLED=0`. It runs linux/amd64, arm64,
 riscv64, arm/v7, and 386 in architecture-specific Debian image digests pinned in
 the script, with Docker `--init` and an explicit `--platform`. Guests need neither
 Go nor a checkout. Each package runs
@@ -386,23 +397,27 @@ DAEMONPILOT_TEST_TIME_SCALE=8 sh daemonpilot-tests/run.sh riscv64
 ```
 
 Omit the architecture argument to detect the native architecture. Use `arm` for
-the arm/v7 bundle. `DAEMONPILOT_TEST_FIXTURES` supplies a directory containing the
-`lifecycle`, `process`, and `update` executables (`.exe` on Windows) when running
-individual test binaries. Each test copies its fixture into its own temporary
-directory. Ordinary `go test` builds fixtures there when no directory is supplied.
+the arm/v7 bundle.
+`DAEMONPILOT_TEST_FIXTURES` supplies the required fixtures, including `lifecycle`,
+`process`, `update`, `probe`, `execfixture-v2`, and `execfixture-v3` (`.exe` on
+Windows) when running individual test binaries. Each test copies its fixture into
+its own temporary directory. Ordinary `go test` builds fixtures there when no
+directory is supplied.
 The watchdog argument probe and process-group probe re-execute the test binary.
 No `ps` is required. The packed runner is Linux-only, not a BSD or Windows bundle.
 The scripts respect the caller's normal Go cache configuration.
 
 `internal/testsupport.Scale` reads `DAEMONPILOT_TEST_TIME_SCALE`, a positive integer
-that defaults to 1. Invalid values and duration overflow fail explicitly. The
-Docker runner sets 8 on emulated architectures and 1 for native execution,
-including 386 on amd64. Wait deadlines and observation windows scale; polling
-frequencies and arithmetic/validation test inputs retain their meaning. The
-bundle disables the process-wide Go test timeout; each operation remains bounded.
+that defaults to 1. Invalid values and duration overflow fail explicitly.
+The Docker runner uses scale 8 and `DAEMONPILOT_TEST_EMULATED=1` for foreign
+architectures, and scale 1 for native execution. For linux/386 on amd64, it
+probes the guest shell's `/proc/<pid>/exe` because Docker may execute that image
+natively or through qemu-i386. Wait deadlines and observation windows scale;
+polling frequencies and arithmetic/validation test inputs retain their meaning.
+The bundle disables the process-wide Go test timeout; each operation remains bounded.
 A caller can add an outer timeout.
 
-The runner declares `DAEMONPILOT_TEST_EMULATED=1` for foreign architectures. Only
+The runner declares `DAEMONPILOT_TEST_EMULATED=1` only for qemu-user guests. Only
 that explicit declaration skips the two address-space-limit tests: qemu-user's
 own mappings make `RLIMIT_AS` unsuitable for measuring guest memory limits.
 Existing host-facility and race-detector exclusions still apply. Emulation does
@@ -518,24 +533,23 @@ or another platform's guarantees. Finit is part of the real-init matrix and uses
 the same required assertions as other restart-capable profiles, subject to its
 explicit asynchronous config-rejection gap.
 
-Validate native Windows SCM lifecycle, systematic mutation and coverage,
-update fault injection beyond the named scenarios, long-running soak, and native
-OpenBSD/NetBSD execution separately from the default suite. Windows Job Object
-support is implemented through procguard, but cross-compilation and argv parser
-tests do not prove SCM or Job Object behavior on a Windows host.
+Validate long-running soak, systematic mutation/coverage, Windows Job Object behavior,
+and update fault injection beyond the named journeys separately. Native Windows SCM
+and macOS launchd service journeys run in the regular CI matrix; native BSD unit and
+integration binaries run in guest VMs. Cross-compilation and Linux emulation do not
+replace those native executions.
 
-| Check                                | Command / procedure                                                                      | Host requirements and limits                                                           |
-| ------------------------------------ | ---------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
-| Unit and integration                 | `GOWORK=off go test -count=1 ./...` and `GOWORK=off go test -count=3 ./test/...`         | Go toolchain, downloaded modules, process execution and writable temporary directories |
-| Race detection                       | `GOWORK=off go test -race ./...`                                                         | Go race-supported native host and C toolchain; not covered by static bundles           |
-| Tagged harness and native companions | `GOWORK=off go vet -tags e2e_docker ./...`, then the native commands above               | Linux for lifecycle native scenarios; no Docker needed                                 |
-| Lifecycle Docker                     | `pnpm dm exec task -- e2e:docker`                                                        | Local Linux Docker, image access and bind-mount ownership                              |
-| Real-init Docker                     | `pnpm dm exec task -- e2e:docker:init`                                                   | Same, plus writable host cgroup tree for systemd; amd64 for procd                      |
-| Five Linux architectures             | `GOWORK=off sh scripts/crossarch.sh docker`                                              | Local Docker and registered binfmt interpreters for foreign architectures              |
-| Fuzz campaign                        | `GOWORK=off sh scripts/fuzz.sh 60s`                                                      | Go fuzz-supported host; budget is per target                                           |
-| Native BSD                           | Ordinary unit/integration commands on each BSD host                                      | Real target kernel; Linux emulation and cross-builds are not substitutes               |
-| Native Windows                       | Ordinary tests plus real SCM install/start/stop/update/uninstall journey                 | Windows and service-management privileges; no SCM end-to-end task is supplied here     |
-| Negative controls                    | Passing baseline, one production mutation, assertion failure, byte-identical restoration | Host needed by selected scenario; compilation errors and skips never count             |
+| Check                    | Command / procedure                                                                                   | Host requirements and limits                                                           |
+| ------------------------ | ----------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| Unit and integration     | `GOWORK=off go test -count=1 ./...` and `GOWORK=off go test -count=3 ./test/...`                      | Go toolchain, downloaded modules, process execution and writable temporary directories |
+| Race detection           | `GOWORK=off go test -race ./...`                                                                      | Supported native OS/architecture and C toolchain; Windows arm64 is not race-enabled    |
+| Native service E2E       | `DAEMONPILOT_E2E_REQUIRE=1 GOWORK=off go test -tags e2e_native -count=1 -v -timeout 20m ./e2e/native` | Windows SCM requires admin; macOS launchd requires an addressable user domain          |
+| Linux lifecycle Docker   | `pnpm dm exec task -- e2e:docker`                                                                     | Local Linux Docker, image access and bind-mount ownership                              |
+| Linux real-init Docker   | `pnpm dm exec task -- e2e:docker:init`                                                                | Same, plus writable host cgroup tree for systemd; amd64 for procd                      |
+| Five Linux architectures | `GOWORK=off sh scripts/crossarch.sh docker`                                                           | Local Docker and registered binfmt interpreters for foreign architectures              |
+| BSD guest runtime suites | Manual/weekly `.github/workflows/platform-e2e.yml` jobs                                               | VM guest runtime; arm64 guests are emulated with scaled wait budgets                   |
+| Fuzz campaign            | `GOWORK=off sh scripts/fuzz.sh 60s`                                                                   | Go fuzz-supported host; budget is per target                                           |
+| Negative controls        | Passing baseline, one production mutation, assertion failure, byte-identical restoration              | Host needed by selected scenario; compilation errors and skips never count             |
 
 Registry checks keep scenario IDs and guide anchors synchronized; they do not
 validate runtime semantics. Prefer observable process, file, argument and

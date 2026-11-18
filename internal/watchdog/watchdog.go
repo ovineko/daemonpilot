@@ -167,7 +167,9 @@ func (w *Watchdog) Run(ctx context.Context) error {
 	defer cancel()
 	w.runCancel = cancel
 
+	shutdownDone := make(chan struct{})
 	go func() {
+		defer close(shutdownDone)
 		<-ctx.Done()
 		w.Shutdown()
 	}()
@@ -212,6 +214,9 @@ func (w *Watchdog) Run(ctx context.Context) error {
 	}
 
 	wg.Wait()
+	if ctx.Err() != nil {
+		<-shutdownDone
+	}
 
 	if w.ipcServer != nil {
 		w.ipcServer.Close()

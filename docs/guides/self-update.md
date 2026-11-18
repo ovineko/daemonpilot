@@ -180,9 +180,14 @@ can resolve probation. The proxy waits for the child to exit before touching the
 copy, so it cannot race the child's commit, restore, or quarantine. A successful
 restore consumes the copy and clears the digest; quarantine moves an invalid
 copy aside. The proxy therefore cannot restore a copy the child already consumed.
-Atomic replacement keeps the installed binary whole if the child crashes during
-restore; a crash before consumption can leave the verified copy for the next
-owner to resolve. These file operations are not a multi-file transaction.
+On platforms with atomic replacement, a crash during restore leaves either the
+old or restored binary at the canonical path. Windows cannot replace an image
+that is currently running, so an installed service publishes a verified
+recovery image and switches SCM to it before moving the old image aside. If the
+process crashes before the SCM switch, the next canonical start recognizes the
+verified recovery image and retries; after the switch, SCM starts that image
+directly. Both paths finish the restore and restart from the canonical binary.
+These file operations are not a multi-file transaction.
 
 The proxy never commits based on child uptime: a long-lived watchdog might have
 an unstable worker. If the proxy restores the previous binary and that watchdog
@@ -207,12 +212,19 @@ sensitive as the update itself. It is bound to the update that created it:
   unverified binary is never executed.
 - Restore opens a regular rollback file, copies it into `<name>.restore`, hashes
   the bytes while copying, and replaces the installed binary only after the
-  digest matches. Unix opens with `O_NOFOLLOW`; Windows checks the file type
+  digest matches. Unix uses an atomic rename. Windows first tries the direct
+  replacement; when the target is running, an installed service switches SCM to
+  the verified recovery image before moving the old image aside and publishing
+  the restored binary. If the process crashes in that window, SCM starts the
+  recovery image, which completes the restore and exits for a restart from the
+  canonical path. A Windows console run has no SCM recovery path and refuses
+  that fallback. Unix opens with `O_NOFOLLOW`; Windows checks the file type
   through `Lstat` before opening and does not offer the same atomic no-follow
   guarantee. A mismatch removes the restore staging file. Hashing while copying
   avoids trusting a separate earlier read of mutable contents. This is not a
   security boundary against a writer of the install directory, including the
-  restore staging path. `uninstall` sweeps a `.restore` file left by interruption.
+  restore staging path. `uninstall` sweeps `.restore`, `.superseded-*`, and the
+  other install artifacts.
 - A `.rollback` file with **no** recorded digest is unusable, and
   `CheckRollbackFile` reports it as such. A rollback copy nobody recorded is one
   nobody created through the verified update path.

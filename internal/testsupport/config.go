@@ -2,6 +2,7 @@
 package testsupport
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -43,7 +44,8 @@ func Executable() string {
 }
 
 // Fixture copies a prebuilt fixture or builds one when no bundle is configured.
-func Fixture(t *testing.T, name, source string) string {
+// buildArgs are passed to go build before the source package.
+func Fixture(t *testing.T, name, source string, buildArgs ...string) string {
 	t.Helper()
 	if runtime.GOOS == "windows" {
 		name += ".exe"
@@ -59,7 +61,11 @@ func Fixture(t *testing.T, name, source string) string {
 		}
 		return path
 	}
-	cmd := exec.CommandContext(t.Context(), "go", "build", "-o", path, source) //nolint:gosec // Source is a test-owned package path, never application input.
+	args := append([]string{"build", "-o", path}, buildArgs...)
+	args = append(args, source)
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Minute)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "go", args...) //nolint:gosec // Source is a test-owned package path, never application input.
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("build %s: %v\n%s", name, err, out)
 	}

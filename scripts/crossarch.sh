@@ -29,6 +29,16 @@ for arch in amd64 arm64 riscv64 arm 386; do
   go build -trimpath -o "$bundle/$arch/fixtures/lifecycle" ./test/fixtures/lifecycle
   go build -trimpath -o "$bundle/$arch/fixtures/process" ./test/integration/testdata/processfixture
   go build -trimpath -o "$bundle/$arch/fixtures/update" ./internal/watchdog/testdata/updatefixture
+  go build -trimpath -o "$bundle/$arch/fixtures/probe" ./internal/updater/testdata/probe
+  for version in v2 v3; do
+    go build -trimpath -ldflags "-X main.version=$version" -o "$bundle/$arch/fixtures/execfixture-$version" ./test/integration/testdata/execfixture
+  done
+  for fixture_mode in run exit0 exit1 exit2 count-exit1 marker-exit1; do
+    go build -trimpath -ldflags "-X main.mode=$fixture_mode" -o "$bundle/$arch/fixtures/watchdog-worker-$fixture_mode" ./internal/watchdog/testdata/portable_worker.go
+  done
+  for version in v1 v2 vreg; do
+    go build -trimpath -ldflags "-X main.version=$version" -o "$bundle/$arch/fixtures/crashfixture-$version" ./internal/updater/testdata/crashfixture
+  done
   while IFS= read -r package; do
     relative=${package#github.com/ovineko/daemonpilot/}
     mkdir -p "$bundle/$arch/$relative"
@@ -54,7 +64,7 @@ cd "$root"
 status=0
 while IFS= read -r package; do
   relative=${package#github.com/ovineko/daemonpilot/}
-  (cd "$root/$relative" && "$root/$arch/$relative/suite.test" -test.v -test.timeout=0) || status=1
+  (cd "$root/$relative" && "$root/$arch/$relative/suite.test" -test.v -test.timeout=30m) || status=1
 done < "$root/packages"
 if [ "$status" -eq 0 ]; then echo "linux/$arch PASS"; else echo "linux/$arch FAIL"; fi
 exit "$status"
@@ -87,9 +97,20 @@ for arch in amd64 arm64 riscv64 arm 386; do
   [ "$arch" != arm ] || platform=linux/arm/v7
   scale=8
   emulated=1
-  if [ "$arch" = "$host" ] || { [ "$arch" = 386 ] && [ "$host" = amd64 ]; }; then
+  if [ "$arch" = "$host" ]; then
     scale=1
     emulated=0
+  elif [ "$arch" = 386 ] && [ "$host" = amd64 ]; then
+    # The amd64 kernel may run 386 natively or route it through qemu-i386.
+    emulator=$(docker run --rm --platform "$platform" --network none \
+      "$(base_image_for "$arch")" sh -c 'readlink /proc/$$/exe')
+    case "$emulator" in
+      */qemu-*) ;;
+      *)
+        scale=1
+        emulated=0
+        ;;
+    esac
   fi
   echo "Running $platform (time scale $scale)"
   if docker run --rm --init --platform "$platform" --network none \
