@@ -1013,9 +1013,14 @@ func (w *Watchdog) workerStableFor(d time.Duration) bool {
 // missing or the restore fails, it stays on the new binary and escalates via
 // OnCriticalFailure.
 func (w *Watchdog) rollbackStaged(rollbackPath string) {
-	// Keep update checks gated until restore and shutdown finish, or a failed
-	// restore has left the current binary in charge again.
-	defer w.onProbation.Store(false)
+	// Keep update checks gated until rollback succeeds. A failed Windows restore
+	// may leave SCM using the updater's staging path as its recovery image.
+	clearProbationOnReturn := false
+	defer func() {
+		if clearProbationOnReturn {
+			w.onProbation.Store(false)
+		}
+	}()
 	currentPath := w.installedBinaryPath()
 
 	// Lstat, not Stat: a dangling symlink planted at the rollback path must
@@ -1049,6 +1054,8 @@ func (w *Watchdog) rollbackStaged(rollbackPath string) {
 		}
 		return
 	}
+	clearProbationOnReturn = true
+
 	if err != nil {
 		w.logger.Warn("staged rollback: restored the previous binary but failed to clean up the copy",
 			"path", rollbackPath, "error", err.Error())

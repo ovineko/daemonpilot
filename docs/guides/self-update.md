@@ -188,6 +188,9 @@ process crashes before the SCM switch, the next canonical start recognizes the
 verified recovery image and retries; after the switch, SCM starts that image
 directly. Both paths finish the restore and restart from the canonical binary.
 These file operations are not a multi-file transaction.
+After an unsuccessful restore, update checks remain paused for that watchdog
+process, even if an invalid rollback copy was quarantined. Restarting
+re-evaluates the rollback state before updates resume.
 
 The proxy never commits based on child uptime: a long-lived watchdog might have
 an unstable worker. If the proxy restores the previous binary and that watchdog

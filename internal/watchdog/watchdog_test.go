@@ -2139,6 +2139,38 @@ func TestProbation_CrashLoop_RollsBack(t *testing.T) {
 	}
 }
 
+func TestProbation_RestoreFailureKeepsUpdatesGated(t *testing.T) {
+	cfg := stagedProbationConfig(t)
+	rollbackPath := testRollbackBinaryPath(cfg)
+	currentPath := testInstalledBinaryPath(cfg)
+	writeFile(t, rollbackPath, "PREVIOUS")
+	recordTestRollbackDigest(t, cfg.InstallDir, cfg.Name, rollbackPath)
+	if err := os.Mkdir(currentPath, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	source := &retrySource{}
+	cfg.Update.Source = source
+	w := New(cfg)
+	w.onProbation.Store(true)
+	w.rollbackStaged(rollbackPath)
+
+	if !w.onProbation.Load() {
+		t.Fatal("failed restore with a retained rollback copy must keep updates gated")
+	}
+	if err := daemonpilot.VerifyRollbackBinary(cfg.InstallDir, cfg.Name, rollbackPath); err != nil {
+		t.Fatalf("rollback copy must remain usable for recovery: %v", err)
+	}
+
+	u := updater.New(cfg.Update, w.logger, cfg.InstallDir, cfg.Name)
+	if err := w.performUpdateCheck(t.Context(), u); err != nil {
+		t.Fatalf("probation gate should skip update checks: %v", err)
+	}
+	if source.checks != 0 || source.downloads != 0 {
+		t.Fatalf("update source calls = checks %d, downloads %d; want 0 while rollback remains", source.checks, source.downloads)
+	}
+}
+
 // A .rollback file that does not match the digest recorded when the staged
 // update created it must not be executed: on a host where the watchdog, the
 // worker and an attacker share a uid, anything else would run a binary the
